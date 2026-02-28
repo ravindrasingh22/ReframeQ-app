@@ -375,16 +375,20 @@ export default function App() {
         subtitle={`${session.fullName} • ${roleLabel(session.mode, copy[session.language])} • ${session.authRole}`}
         onOpenMenu={() => setSidebarOpen(true)}
       />
-      {mainTab === 'chat' ? (
-        <Text style={{fontSize: 12, color: '#5a6475', marginTop: 2}}>{t.chatTitle}</Text>
-      ) : (
-        <Title title={title} subtitle="" />
-      )}
+      {mainTab !== 'chat' ? <Title title={title} subtitle="" /> : null}
     </>
   );
 
   const handleMainTabChange = (tab: MainTab) => {
     setMainTab(tab);
+    setSidebarPage('none');
+  };
+
+  const handleSignOut = () => {
+    setSession(null);
+    setAppState('auth');
+    setAuthStep('login');
+    setSidebarOpen(false);
     setSidebarPage('none');
   };
 
@@ -481,13 +485,7 @@ export default function App() {
                 fullName={session.fullName}
                 authRole={session.authRole}
                 mode={session.mode}
-                onSignOut={() => {
-                  setSession(null);
-                  setAppState('auth');
-                  setAuthStep('login');
-                  setSidebarOpen(false);
-                  setSidebarPage('none');
-                }}
+                onSignOut={handleSignOut}
               />
             ) : null}
 
@@ -555,6 +553,7 @@ export default function App() {
             setSidebarPage('none');
             setSidebarOpen(false);
           }}
+          onLogout={handleSignOut}
         />
       ) : null}
     </SafeAreaView>
@@ -736,9 +735,6 @@ function ChatScreen({
 
   return (
     <View style={{flex: 1, minHeight: 280}}>
-      <Text style={styles.subtitle}>
-        Placeholder LLM chat service. Language: {language === 'en' ? 'English' : 'Hinglish'}
-      </Text>
       <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center'}}>
         <Text style={styles.hintText}>Thread history</Text>
         <Pressable onPress={() => setHistoryExpanded(v => !v)}>
@@ -796,13 +792,18 @@ function ChatScreen({
             <Text style={{fontSize: 11, color: '#6b7280'}}>{msg.role === 'user' ? 'You' : 'ReframeQ AI'}</Text>
           </View>
         ))}
+        {loading ? (
+          <View style={[styles.bubble, styles.aiBubble]}>
+            <Text style={{color: '#1d2538'}}>Thinking...</Text>
+            <Text style={{fontSize: 11, color: '#6b7280'}}>ReframeQ AI</Text>
+          </View>
+        ) : null}
       </ScrollView>
       <View style={{borderTopWidth: 1, borderTopColor: '#e5e7eb', paddingTop: 8}}>
         <View style={{position: 'relative'}}>
           <TextInput
             value={input}
             onChangeText={onInput}
-            placeholder="Type your message..."
             style={[
               styles.input,
               {

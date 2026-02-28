@@ -7,12 +7,14 @@ export function SidebarMenu({
   onFamily,
   onLanguage,
   onMain,
+  onLogout,
 }: {
   onClose: () => void;
   onProfile: () => void;
   onFamily: () => void;
   onLanguage: () => void;
   onMain: () => void;
+  onLogout: () => void;
 }) {
   return (
     <View
@@ -40,6 +42,7 @@ export function SidebarMenu({
         <SidebarItem label="Family Profiles" onPress={onFamily} />
         <SidebarItem label="Language" onPress={onLanguage} />
         <SidebarItem label="Back to Main" onPress={onMain} />
+        <SidebarItem label="Logout" onPress={onLogout} />
       </View>
     </View>
   );
