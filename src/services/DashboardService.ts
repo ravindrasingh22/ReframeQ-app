@@ -1,4 +1,4 @@
-const API_BASE_URL = 'http://localhost:8001';
+import {buildApiUrl} from '../config/appConfig';
 
 export type DashboardHeader = {
   title: string;
@@ -113,7 +113,7 @@ export type MoodReport = {
 };
 
 export async function fetchHomeDashboard(token: string): Promise<HomeDashboard> {
-  const response = await fetch(`${API_BASE_URL}/api/app/dashboard/home`, {
+  const response = await fetch(buildApiUrl('/api/app/dashboard/home'), {
     headers: {Authorization: `Bearer ${token}`},
   });
   const data = await response.json();
@@ -124,7 +124,7 @@ export async function fetchHomeDashboard(token: string): Promise<HomeDashboard> 
 }
 
 export async function saveMoodCheckin(token: string, moodId: string): Promise<MoodCheckinResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/app/moods/check-in`, {
+  const response = await fetch(buildApiUrl('/api/app/moods/check-in'), {
     method: 'POST',
     headers: {'Content-Type': 'application/json', Authorization: `Bearer ${token}`},
     body: JSON.stringify({mood_id: moodId}),
@@ -137,7 +137,7 @@ export async function saveMoodCheckin(token: string, moodId: string): Promise<Mo
 }
 
 export async function fetchMoodReport(token: string, rangeDays: 7 | 14 | 30): Promise<MoodReport> {
-  const response = await fetch(`${API_BASE_URL}/api/app/moods/report?range_days=${rangeDays}`, {
+  const response = await fetch(buildApiUrl(`/api/app/moods/report?range_days=${rangeDays}`), {
     headers: {Authorization: `Bearer ${token}`},
   });
   const data = await response.json();

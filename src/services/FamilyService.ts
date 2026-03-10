@@ -1,4 +1,4 @@
-const API_BASE_URL = 'http://localhost:8001';
+import {buildApiUrl} from '../config/appConfig';
 
 export type FamilyProfile = {
   profile_id: number;
@@ -15,7 +15,7 @@ export type FamilyProfile = {
 };
 
 export async function fetchMyProfiles(token: string): Promise<FamilyProfile[]> {
-  const response = await fetch(`${API_BASE_URL}/api/app/family/profiles`, {
+  const response = await fetch(buildApiUrl('/api/app/family/profiles'), {
     headers: {Authorization: `Bearer ${token}`},
   });
   const data = await response.json();
@@ -36,7 +36,7 @@ export async function createMyProfile(
     conversation_visibility_rule: string;
   },
 ): Promise<FamilyProfile> {
-  const response = await fetch(`${API_BASE_URL}/api/app/family/profiles`, {
+  const response = await fetch(buildApiUrl('/api/app/family/profiles'), {
     method: 'POST',
     headers: {'Content-Type': 'application/json', Authorization: `Bearer ${token}`},
     body: JSON.stringify(payload),
@@ -59,7 +59,7 @@ export async function updateChildProfile(
     conversation_visibility_rule?: string;
   },
 ): Promise<FamilyProfile> {
-  const response = await fetch(`${API_BASE_URL}/api/app/family/profiles/${profileId}`, {
+  const response = await fetch(buildApiUrl(`/api/app/family/profiles/${profileId}`), {
     method: 'PATCH',
     headers: {'Content-Type': 'application/json', Authorization: `Bearer ${token}`},
     body: JSON.stringify(payload),
@@ -72,7 +72,7 @@ export async function updateChildProfile(
 }
 
 export async function updateChildStatus(token: string, profileId: number, profileActive: boolean): Promise<FamilyProfile> {
-  const response = await fetch(`${API_BASE_URL}/api/app/family/profiles/${profileId}/status`, {
+  const response = await fetch(buildApiUrl(`/api/app/family/profiles/${profileId}/status`), {
     method: 'PATCH',
     headers: {'Content-Type': 'application/json', Authorization: `Bearer ${token}`},
     body: JSON.stringify({profile_active: profileActive}),
@@ -90,7 +90,7 @@ export async function recordChildConsent(
   guardianUserId: number,
   consentTextVersion = 'v1',
 ): Promise<FamilyProfile> {
-  const response = await fetch(`${API_BASE_URL}/api/app/family/profiles/${profileId}/consent`, {
+  const response = await fetch(buildApiUrl(`/api/app/family/profiles/${profileId}/consent`), {
     method: 'POST',
     headers: {'Content-Type': 'application/json', Authorization: `Bearer ${token}`},
     body: JSON.stringify({guardian_user_id: guardianUserId, consent_text_version: consentTextVersion}),
@@ -103,7 +103,7 @@ export async function recordChildConsent(
 }
 
 export async function deleteMyProfile(token: string, profileId: number): Promise<void> {
-  const response = await fetch(`${API_BASE_URL}/api/app/family/profiles/${profileId}`, {
+  const response = await fetch(buildApiUrl(`/api/app/family/profiles/${profileId}`), {
     method: 'DELETE',
     headers: {Authorization: `Bearer ${token}`},
   });

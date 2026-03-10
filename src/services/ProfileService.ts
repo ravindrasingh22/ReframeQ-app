@@ -1,9 +1,13 @@
-const API_BASE_URL = 'http://localhost:8001';
+import {buildApiUrl} from '../config/appConfig';
 
 export type AppProfile = {
   email: string;
   role: string;
   full_name: string;
+  mobile_country_code: string;
+  mobile_number: string;
+  city: string;
+  state: string;
   country: string;
   language: string;
   account_mode: string;
@@ -20,8 +24,18 @@ export type AppProfile = {
   };
 };
 
+export type UpdateAppProfilePayload = {
+  full_name?: string;
+  mobile_country_code?: string;
+  mobile_number?: string;
+  city?: string;
+  state?: string;
+  country?: string;
+  language?: string;
+};
+
 export async function fetchMyProfile(token: string): Promise<AppProfile> {
-  const response = await fetch(`${API_BASE_URL}/api/app/profile/me`, {
+  const response = await fetch(buildApiUrl('/api/app/profile/me'), {
     headers: {Authorization: `Bearer ${token}`},
   });
   const data = await response.json();
@@ -29,4 +43,35 @@ export async function fetchMyProfile(token: string): Promise<AppProfile> {
     throw new Error(typeof data?.detail === 'string' ? data.detail : 'Failed to load profile');
   }
   return data as AppProfile;
+}
+
+export async function updateMyProfile(token: string, payload: UpdateAppProfilePayload): Promise<AppProfile> {
+  const response = await fetch(buildApiUrl('/api/app/profile/me'), {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(typeof data?.detail === 'string' ? data.detail : 'Failed to update profile');
+  }
+  return data as AppProfile;
+}
+
+export async function changeMyPassword(token: string, newPassword: string): Promise<void> {
+  const response = await fetch(buildApiUrl('/api/app/profile/me/password'), {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({new_password: newPassword}),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(typeof data?.detail === 'string' ? data.detail : 'Failed to change password');
+  }
 }

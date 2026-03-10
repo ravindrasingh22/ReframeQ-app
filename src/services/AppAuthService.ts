@@ -1,4 +1,4 @@
-const API_BASE_URL = 'http://localhost:8001';
+import {buildApiUrl} from '../config/appConfig';
 
 export type AppLoginResponse = {
   access_token: string;
@@ -16,7 +16,7 @@ type AppRegisterPayload = {
 };
 
 export async function loginApp(email: string, password: string): Promise<AppLoginResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/app/auth/login`, {
+  const response = await fetch(buildApiUrl('/api/app/auth/login'), {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({email, password}),
@@ -32,7 +32,7 @@ export async function loginApp(email: string, password: string): Promise<AppLogi
 }
 
 export async function registerApp(payload: AppRegisterPayload): Promise<AppLoginResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/app/auth/register`, {
+  const response = await fetch(buildApiUrl('/api/app/auth/register'), {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(payload),

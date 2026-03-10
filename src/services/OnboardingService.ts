@@ -1,4 +1,4 @@
-const API_BASE_URL = 'http://localhost:8001';
+import {buildApiUrl} from '../config/appConfig';
 
 export type PersistedOnboardingState = {
   account_mode: string;
@@ -49,7 +49,7 @@ export type OnboardingConfig = {
 };
 
 export async function validateInviteCode(inviteCode: string) {
-  const response = await fetch(`${API_BASE_URL}/api/app/onboarding/invite/validate`, {
+  const response = await fetch(buildApiUrl('/api/app/onboarding/invite/validate'), {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({invite_code: inviteCode}),
@@ -62,7 +62,7 @@ export async function validateInviteCode(inviteCode: string) {
 }
 
 export async function fetchOnboardingConfig() {
-  const response = await fetch(`${API_BASE_URL}/api/app/onboarding/config`);
+  const response = await fetch(buildApiUrl('/api/app/onboarding/config'));
   const data = await response.json();
   if (!response.ok) {
     throw new Error(typeof data?.detail === 'string' ? data.detail : 'Failed to load onboarding configuration');
@@ -71,7 +71,7 @@ export async function fetchOnboardingConfig() {
 }
 
 export async function scanOnboardingSafety(message: string) {
-  const response = await fetch(`${API_BASE_URL}/api/app/onboarding/safety/scan`, {
+  const response = await fetch(buildApiUrl('/api/app/onboarding/safety/scan'), {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({message}),
@@ -87,7 +87,7 @@ export async function saveOnboardingState(
   token: string,
   payload: {step: string; completed: boolean; state: PersistedOnboardingState},
 ) {
-  const response = await fetch(`${API_BASE_URL}/api/app/onboarding/state`, {
+  const response = await fetch(buildApiUrl('/api/app/onboarding/state'), {
     method: 'PUT',
     headers: {'Content-Type': 'application/json', Authorization: `Bearer ${token}`},
     body: JSON.stringify(payload),
@@ -100,7 +100,7 @@ export async function saveOnboardingState(
 }
 
 export async function fetchOnboardingState(token: string) {
-  const response = await fetch(`${API_BASE_URL}/api/app/onboarding/state`, {
+  const response = await fetch(buildApiUrl('/api/app/onboarding/state'), {
     headers: {Authorization: `Bearer ${token}`},
   });
   const data = await response.json();

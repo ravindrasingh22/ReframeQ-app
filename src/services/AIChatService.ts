@@ -1,5 +1,6 @@
+import {buildApiUrl} from '../config/appConfig';
+
 type Language = 'en' | 'hinglish';
-const API_BASE_URL = 'http://localhost:8001';
 
 const enReplies = [
   'I hear you. Let us slow down and take one deep breath together.',
@@ -38,7 +39,7 @@ export async function getAssistantReplyFromBackend(
   language: Language,
   threadId?: number,
 ): Promise<string> {
-  const response = await fetch(`${API_BASE_URL}/api/app/chat/message`, {
+  const response = await fetch(buildApiUrl('/api/app/chat/message'), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -69,7 +70,7 @@ export type ChatThreadMessage = {
 };
 
 export async function fetchThreads(token: string): Promise<ChatThread[]> {
-  const response = await fetch(`${API_BASE_URL}/api/app/chat/threads`, {
+  const response = await fetch(buildApiUrl('/api/app/chat/threads'), {
     headers: {Authorization: `Bearer ${token}`},
   });
   const data = await response.json();
@@ -83,7 +84,7 @@ export async function fetchThreadDetail(
   token: string,
   threadId: number,
 ): Promise<{thread: ChatThread; messages: ChatThreadMessage[]}> {
-  const response = await fetch(`${API_BASE_URL}/api/app/chat/threads/${threadId}`, {
+  const response = await fetch(buildApiUrl(`/api/app/chat/threads/${threadId}`), {
     headers: {Authorization: `Bearer ${token}`},
   });
   const data = await response.json();
@@ -107,7 +108,7 @@ export async function sendChatMessage(
   language: Language,
   threadId?: number,
 ): Promise<{reply: string; thread_id: number; thread_title: string}> {
-  const response = await fetch(`${API_BASE_URL}/api/app/chat/message`, {
+  const response = await fetch(buildApiUrl('/api/app/chat/message'), {
     method: 'POST',
     headers: {'Content-Type': 'application/json', Authorization: `Bearer ${token}`},
     body: JSON.stringify({message, language, thread_id: threadId}),

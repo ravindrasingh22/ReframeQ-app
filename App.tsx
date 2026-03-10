@@ -1,5 +1,6 @@
 import React, {useEffect, useMemo, useState} from 'react';
 import {
+  Modal,
   Platform,
   Pressable,
   SafeAreaView,
@@ -10,13 +11,15 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import Svg, {Circle, Line, Path, Text as SvgText} from 'react-native-svg';
 import {loginApp, registerApp} from './src/services/AppAuthService';
 import {createMyProfile, fetchMyProfiles, recordChildConsent} from './src/services/FamilyService';
 import {generateOnboardingAI, type OnboardingAIRequest, type OnboardingAIResult} from './src/services/OnboardingAIService';
 import {fetchOnboardingConfig, fetchOnboardingState, saveOnboardingState, scanOnboardingSafety, validateInviteCode, type OnboardingConfig, type PersistedOnboardingState} from './src/services/OnboardingService';
-import {fetchMyProfile, type AppProfile as RemoteAppProfile} from './src/services/ProfileService';
+import {changeMyPassword, fetchMyProfile, updateMyProfile, type AppProfile as RemoteAppProfile} from './src/services/ProfileService';
 import {fetchThreadDetail, fetchThreads, getAssistantReply, sendChatMessage, type ChatThreadMessage} from './src/services/AIChatService';
 import {fetchHomeDashboard, fetchMoodReport, saveMoodCheckin, type DashboardStatCard, type HomeDashboard, type MoodReport, type MoodTrendPoint} from './src/services/DashboardService';
+import {indiaLocations, indiaStates} from './src/data/indiaLocations';
 
 type TabId = 'home' | 'reports' | 'chat' | 'tools' | 'family' | 'profile';
 type AppMode = 'splash' | 'landing' | 'auth' | 'onboarding' | 'app';
@@ -252,6 +255,18 @@ const reminderOptions: Array<{id: ReminderPreference; label: string; desc?: stri
   {id: 'only_when_choose', label: 'Only when I choose'},
   {id: 'no_reminders', label: 'No reminders'},
 ];
+
+const phoneCountryCodes = [
+  {label: 'India', code: '+91'},
+  {label: 'United States', code: '+1'},
+  {label: 'United Kingdom', code: '+44'},
+  {label: 'Canada', code: '+1'},
+  {label: 'Australia', code: '+61'},
+  {label: 'Singapore', code: '+65'},
+  {label: 'UAE', code: '+971'},
+];
+
+const profileCountries = ['India', 'United States', 'United Kingdom', 'Canada', 'Australia', 'Singapore', 'UAE'];
 
 const familyProfiles: FamilyProfile[] = [
   {name: 'Alisha', type: 'Child', age: '9-12', rule: 'Weekly summary', time: '20 min/day', topics: 'Guided topics only', status: 'Active'},
@@ -855,25 +870,35 @@ function Icon({name, size = 18, color = '#4b5563', stroke = 1.8}: {name: IconNam
   }
 }
 
-function Shell({title, subtitle, showBack = false, rightSlot, children}: {title: string; subtitle: string; showBack?: boolean; rightSlot?: React.ReactNode; children: React.ReactNode}) {
+function Shell({
+  title,
+  subtitle,
+  showBack = false,
+  onBack,
+  rightSlot,
+  children,
+}: {
+  title: string;
+  subtitle: string;
+  showBack?: boolean;
+  onBack?: () => void;
+  rightSlot?: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="dark-content" />
       <View style={styles.appShell}>
-        <View style={styles.topStatusRow}>
-          <Text style={styles.timeText}>9:41</Text>
-          <View style={styles.statusDots}>
-            <View style={styles.statusDotSmall} />
-            <View style={[styles.statusDotSmall, {opacity: 0.65}]} />
-            <View style={styles.statusPill} />
-          </View>
-        </View>
-        <View style={styles.notch} />
         <View style={styles.headerRow}>
           <View style={styles.headerLeft}>
             {showBack ? (
-              <View style={styles.backButton}>
-                <Icon name="arrowLeft" size={16} color="#374151" />
+              <View style={styles.headerLeadGroup}>
+                <Pressable style={styles.backButton} onPress={onBack}>
+                  <Icon name="arrowLeft" size={16} color="#374151" />
+                </Pressable>
+                <View style={styles.logoBadgeSmall}>
+                  <Icon name="sparkles" size={16} color="#ffffff" />
+                </View>
               </View>
             ) : (
               <View style={styles.logoBadge}>
@@ -1036,7 +1061,10 @@ function TextField({
   placeholder,
   secure = false,
   multiline = false,
+  editable = true,
   autoCapitalize = 'sentences',
+  onSubmitEditing,
+  returnKeyType,
 }: {
   label: string;
   value: string;
@@ -1044,7 +1072,10 @@ function TextField({
   placeholder?: string;
   secure?: boolean;
   multiline?: boolean;
+  editable?: boolean;
   autoCapitalize?: 'none' | 'sentences' | 'words' | 'characters';
+  onSubmitEditing?: () => void;
+  returnKeyType?: 'done' | 'next' | 'go' | 'send';
 }) {
   return (
     <View style={styles.inputBlock}>
@@ -1055,11 +1086,82 @@ function TextField({
         placeholder={placeholder}
         secureTextEntry={secure}
         multiline={multiline}
+        editable={editable}
         autoCapitalize={autoCapitalize}
+        onSubmitEditing={onSubmitEditing}
+        returnKeyType={returnKeyType}
+        blurOnSubmit={!multiline}
         placeholderTextColor="#9ca3af"
-        style={[styles.input, multiline && styles.textarea]}
+        style={[styles.input, multiline && styles.textarea, !editable && styles.inputDisabled]}
       />
     </View>
+  );
+}
+
+function InlineSelect({
+  label,
+  value,
+  placeholder,
+  onToggle,
+}: {
+  label: string;
+  value: string;
+  placeholder: string;
+  onToggle: () => void;
+}) {
+  return (
+    <View style={styles.inputBlock}>
+      <Text style={styles.inputLabel}>{label}</Text>
+      <Pressable style={styles.inlineSelectButton} onPress={onToggle}>
+        <Text numberOfLines={1} style={[styles.inlineSelectValue, !value && styles.inlineSelectPlaceholder]}>
+          {value || placeholder}
+        </Text>
+        <Icon name="arrowRight" size={12} color="#6d28d9" />
+      </Pressable>
+    </View>
+  );
+}
+
+function SelectionSheet({
+  visible,
+  title,
+  value,
+  options,
+  onClose,
+  onSelect,
+}: {
+  visible: boolean;
+  title: string;
+  value: string;
+  options: string[];
+  onClose: () => void;
+  onSelect: (value: string) => void;
+}) {
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <View style={styles.sheetBackdrop}>
+        <Pressable style={styles.sheetScrim} onPress={onClose} />
+        <View style={styles.sheetCard}>
+          <View style={styles.sheetHeader}>
+            <Text style={styles.sheetTitle}>{title}</Text>
+            <Pressable onPress={onClose} style={styles.sheetCloseButton}>
+              <Text style={styles.sheetCloseText}>Close</Text>
+            </Pressable>
+          </View>
+          <ScrollView style={styles.sheetList} contentContainerStyle={styles.sheetListContent} showsVerticalScrollIndicator={false}>
+            {options.map(option => (
+              <Pressable
+                key={option}
+                style={[styles.sheetOption, value === option && styles.sheetOptionActive]}
+                onPress={() => onSelect(option)}>
+                <Text style={[styles.sheetOptionText, value === option && styles.sheetOptionTextActive]}>{option}</Text>
+                {value === option ? <Icon name="check" size={14} color="#6d28d9" /> : null}
+              </Pressable>
+            ))}
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -1200,12 +1302,12 @@ function AuthScreen({
   onBack: () => void;
 }) {
   return (
-    <Shell title="Log in" subtitle="Continue where you left off" showBack rightSlot={null}>
+    <Shell title="Log in" subtitle="Continue where you left off" showBack onBack={onBack} rightSlot={null}>
       <View style={styles.cardList}>
         <Text style={styles.screenTitle}>Welcome back</Text>
         <Text style={styles.screenSubtitle}>Log in to open your saved space or resume onboarding.</Text>
-        <TextField label="Email" value={email} onChange={onEmailChange} placeholder="you@example.com" autoCapitalize="none" />
-        <TextField label="Password" value={password} onChange={onPasswordChange} placeholder="Your password" secure autoCapitalize="none" />
+        <TextField label="Email" value={email} onChange={onEmailChange} placeholder="you@example.com" autoCapitalize="none" returnKeyType="next" />
+        <TextField label="Password" value={password} onChange={onPasswordChange} placeholder="Your password" secure autoCapitalize="none" onSubmitEditing={onLogin} returnKeyType="go" />
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
         <Pressable style={styles.primaryButton} onPress={onLogin}>
           <Text style={styles.primaryButtonText}>Log in</Text>
@@ -1402,7 +1504,7 @@ function HomeScreen({profile, authToken, onOpenReports}: {profile: RemoteAppProf
   );
 }
 
-function ReportsScreen({authToken}: {authToken: string}) {
+function ReportsScreen({authToken, onBack}: {authToken: string; onBack: () => void}) {
   const [rangeDays, setRangeDays] = useState<7 | 14 | 30>(7);
   const [report, setReport] = useState<MoodReport | null>(null);
   const [loading, setLoading] = useState(false);
@@ -1434,7 +1536,7 @@ function ReportsScreen({authToken}: {authToken: string}) {
   }, [authToken, rangeDays]);
 
   return (
-    <Shell title="Reports" subtitle="Track your mood patterns over time">
+    <Shell title="Reports" subtitle="Track your mood patterns over time" showBack onBack={onBack}>
       <View style={styles.filterRow}>
         {[7, 14, 30].map(value => (
           <Pressable key={value} style={[styles.filterChip, rangeDays === value && styles.filterChipActive]} onPress={() => setRangeDays(value as 7 | 14 | 30)}>
@@ -1537,32 +1639,75 @@ function MoodLineChart({points, height, showLabels}: {points: MoodTrendPoint[]; 
     );
   }
 
-  const chartWidth = 100;
+  const width = showLabels ? 320 : 300;
+  const svgHeight = showLabels ? height : height - 8;
+  const leftPad = showLabels ? 24 : 10;
+  const rightPad = 10;
+  const topPad = 10;
+  const bottomPad = showLabels ? 26 : 10;
+  const innerWidth = width - leftPad - rightPad;
+  const innerHeight = svgHeight - topPad - bottomPad;
   const normalized = points.map((point, index) => {
-    const x = points.length === 1 ? 50 : (index / (points.length - 1)) * chartWidth;
-    const y = ((5 - point.score) / 4) * 100;
+    const x = points.length === 1 ? leftPad + innerWidth / 2 : leftPad + (index / (points.length - 1)) * innerWidth;
+    const y = topPad + ((5 - point.score) / 4) * innerHeight;
     return {...point, x, y};
   });
 
+  function buildSmoothPath(values: typeof normalized) {
+    if (values.length === 1) {
+      return `M ${values[0].x} ${values[0].y}`;
+    }
+    let path = `M ${values[0].x} ${values[0].y}`;
+    for (let index = 0; index < values.length - 1; index += 1) {
+      const current = values[index];
+      const next = values[index + 1];
+      const midX = (current.x + next.x) / 2;
+      path += ` Q ${midX} ${current.y}, ${midX} ${((current.y + next.y) / 2)}`;
+      path += ` Q ${midX} ${next.y}, ${next.x} ${next.y}`;
+    }
+    return path;
+  }
+
+  const primaryPath = buildSmoothPath(normalized);
+  const baseline = normalized.map((point, index) => {
+    const offset = Math.sin(index * 1.3) * 0.35;
+    const baselineScore = Math.max(1, Math.min(5, point.score - offset - 0.7));
+    return {
+      ...point,
+      y: topPad + ((5 - baselineScore) / 4) * innerHeight,
+    };
+  });
+  const baselinePath = buildSmoothPath(baseline);
+
   return (
     <View style={[styles.chartArea, {height}]}>
-      {[1, 2, 3, 4, 5].map(score => (
-        <View key={score} style={[styles.chartGridLine, {top: `${((5 - score) / 4) * 100}%`}]} />
-      ))}
-      {normalized.slice(0, -1).map((point, index) => {
-        const next = normalized[index + 1];
-        const dx = next.x - point.x;
-        const dy = next.y - point.y;
-        const length = Math.sqrt(dx * dx + dy * dy);
-        const angle = (Math.atan2(dy, dx) * 180) / Math.PI;
-        return <View key={`${point.date}-${next.date}`} style={[styles.chartSegment, {left: `${point.x}%`, top: `${point.y}%`, width: `${length}%`, transform: [{rotate: `${angle}deg`}]}]} />;
-      })}
-      {normalized.map(point => (
-        <View key={point.date} style={[styles.chartPointWrap, {left: `${point.x}%`, top: `${point.y}%`}]}>
-          <View style={styles.chartPoint} />
-          {showLabels ? <Text style={styles.chartLabel}>{point.date.slice(5)}</Text> : null}
-        </View>
-      ))}
+      <Svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`}>
+        {[1, 2, 3, 4, 5].map(score => {
+          const y = topPad + ((5 - score) / 4) * innerHeight;
+          return (
+            <React.Fragment key={score}>
+              <Line x1={leftPad} x2={width - rightPad} y1={y} y2={y} stroke="#ddd6fe" strokeDasharray="3 4" strokeWidth="1" />
+              {showLabels ? (
+                <SvgText x={4} y={y + 4} fontSize="10" fill="#94a3b8">
+                  {score}
+                </SvgText>
+              ) : null}
+            </React.Fragment>
+          );
+        })}
+        <Path d={baselinePath} fill="none" stroke="#cbd5e1" strokeWidth="2" />
+        <Path d={primaryPath} fill="none" stroke="#06b6d4" strokeWidth={showLabels ? 3 : 2.5} strokeLinecap="round" strokeLinejoin="round" />
+        {normalized.map(point => (
+          <React.Fragment key={point.date}>
+            <Circle cx={point.x} cy={point.y} r={showLabels ? 4 : 3} fill="#ffffff" stroke="#06b6d4" strokeWidth="2" />
+            {showLabels ? (
+              <SvgText x={point.x} y={height - 6} fontSize="10" fill="#94a3b8" textAnchor="middle">
+                {point.date.slice(5)}
+              </SvgText>
+            ) : null}
+          </React.Fragment>
+        ))}
+      </Svg>
     </View>
   );
 }
@@ -1571,10 +1716,12 @@ function ChatScreen({
   state,
   authToken,
   generatedReframe,
+  onBack,
 }: {
   state: OnboardingState;
   authToken: string;
   generatedReframe: GeneratedReframe | null;
+  onBack: () => void;
 }) {
   const [messages, setMessages] = useState<CoachMessage[]>(() => buildCoachStarter(state, generatedReframe));
   const [threadId, setThreadId] = useState<number | null>(null);
@@ -1683,7 +1830,7 @@ function ChatScreen({
   ];
 
   return (
-    <Shell title="Coach" subtitle="Safe, structured, and supportive" showBack rightSlot={<Badge label={summary.patternLabel} tone="emerald" />}>
+    <Shell title="Coach" subtitle="Safe, structured, and supportive" showBack onBack={onBack} rightSlot={<Badge label={summary.patternLabel} tone="emerald" />}>
       <View style={styles.goalCard}>
         <View>
           <Text style={styles.goalTitle}>Session goal</Text>
@@ -1752,9 +1899,9 @@ function ChatScreen({
   );
 }
 
-function ToolsScreen() {
+function ToolsScreen({onBack}: {onBack: () => void}) {
   return (
-    <Shell title="Tools" subtitle="Guided reflection and daily support" showBack>
+    <Shell title="Tools" subtitle="Guided reflection and daily support" showBack onBack={onBack}>
       <View style={styles.grid}>
         {tools.map(item => (
           <View key={item.title} style={styles.gridCard}>
@@ -1770,9 +1917,9 @@ function ToolsScreen() {
   );
 }
 
-function FamilyScreen({profiles}: {profiles: FamilyProfile[]}) {
+function FamilyScreen({profiles, onBack}: {profiles: FamilyProfile[]; onBack: () => void}) {
   return (
-    <Shell title="Family Space" subtitle="Profiles, limits, and visibility" showBack rightSlot={<Icon name="settings" size={18} color="#6b7280" />}>
+    <Shell title="Family Space" subtitle="Profiles, limits, and visibility" showBack onBack={onBack} rightSlot={<Icon name="settings" size={18} color="#6b7280" />}>
       <View style={styles.cardList}>
         {(profiles.length ? profiles : familyProfiles).map(profile => (
           <View key={profile.name} style={styles.familyCard}>
@@ -1794,11 +1941,94 @@ function FamilyScreen({profiles}: {profiles: FamilyProfile[]}) {
   );
 }
 
-function ProfileScreen({profile, onLogout}: {profile: RemoteAppProfile | null; onLogout: () => void}) {
+function ProfileScreen({
+  profile,
+  authToken,
+  onProfileUpdated,
+  onLogout,
+  onBack,
+}: {
+  profile: RemoteAppProfile | null;
+  authToken: string;
+  onProfileUpdated: (profile: RemoteAppProfile) => void;
+  onLogout: () => void;
+  onBack: () => void;
+}) {
   const displayName = profile?.full_name || 'Profile';
   const initial = displayName.charAt(0).toUpperCase() || 'R';
+  const [isEditing, setIsEditing] = useState(false);
+  const [fullName, setFullName] = useState(profile?.full_name || '');
+  const [email, setEmail] = useState(profile?.email || '');
+  const [mobileCountryCode, setMobileCountryCode] = useState(profile?.mobile_country_code || '');
+  const [mobileNumber, setMobileNumber] = useState(profile?.mobile_number || '');
+  const [city, setCity] = useState(profile?.city || '');
+  const [stateName, setStateName] = useState(profile?.state || '');
+  const [country, setCountry] = useState(profile?.country || '');
+  const [language, setLanguage] = useState(profile?.language || 'en');
+  const [newPassword, setNewPassword] = useState('');
+  const [showCodePicker, setShowCodePicker] = useState(false);
+  const [showCountryPicker, setShowCountryPicker] = useState(false);
+  const [showStatePicker, setShowStatePicker] = useState(false);
+  const [showCityPicker, setShowCityPicker] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [formError, setFormError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
+
+  useEffect(() => {
+    setFullName(profile?.full_name || '');
+    setEmail(profile?.email || '');
+    setMobileCountryCode(profile?.mobile_country_code || '');
+    setMobileNumber(profile?.mobile_number || '');
+    setCity(profile?.city || '');
+    setStateName(profile?.state || '');
+    setCountry(profile?.country || '');
+    setLanguage(profile?.language || 'en');
+  }, [profile]);
+
+  async function handleSaveProfile() {
+    if (!authToken) return;
+    setFormError('');
+    setSuccessMessage('');
+    if (!fullName.trim()) {
+      setFormError('Name is required.');
+      return;
+    }
+    if (newPassword && newPassword.trim().length < 8) {
+      setFormError('Password must be at least 8 characters.');
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const updatedProfile = await updateMyProfile(authToken, {
+        full_name: fullName.trim(),
+        mobile_country_code: mobileCountryCode.trim(),
+        mobile_number: mobileNumber.trim(),
+        city: city.trim(),
+        state: stateName.trim(),
+        country: country.trim(),
+        language: language.trim() || 'en',
+      });
+      if (newPassword.trim()) {
+        await changeMyPassword(authToken, newPassword.trim());
+      }
+      onProfileUpdated(updatedProfile);
+      setNewPassword('');
+      setIsEditing(false);
+      setSuccessMessage(newPassword.trim() ? 'Profile and password updated.' : 'Profile updated.');
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : 'Failed to update profile');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  const selectedPhoneCode = phoneCountryCodes.find(item => item.code === mobileCountryCode);
+  const isIndiaSelected = country.trim().toLowerCase() === 'india';
+  const cityOptions = stateName ? (indiaLocations[stateName] ?? []) : [];
+
   return (
-    <Shell title="Profile" subtitle="Preferences, privacy, and account" showBack rightSlot={<Icon name="settings" size={18} color="#6b7280" />}>
+    <Shell title="Profile" subtitle="Preferences, privacy, and account" showBack onBack={onBack} rightSlot={<Icon name="settings" size={18} color="#6b7280" />}>
       <View style={styles.profileHero}>
         <View style={styles.profileAvatar}>
           <Text style={styles.profileAvatarText}>{initial}</Text>
@@ -1811,7 +2041,133 @@ function ProfileScreen({profile, onLogout}: {profile: RemoteAppProfile | null; o
       <View style={styles.cardList}>
         <View style={styles.softCard}>
           <Text style={styles.listCardTitle}>{profile?.email || 'No email available'}</Text>
-          <Text style={styles.listCardBody}>Language: {profile?.language || 'en'} • Country: {profile?.country || 'IN'}</Text>
+          <Text style={styles.listCardBody}>
+            {(profile?.mobile_country_code || profile?.mobile_number)
+              ? `Mobile: ${profile?.mobile_country_code || ''} ${profile?.mobile_number || ''}`
+              : 'Mobile not added'}
+          </Text>
+          <Text style={styles.listCardBody}>
+            {[profile?.city, profile?.state, profile?.country].filter(Boolean).join(' • ') || 'Location not added'}
+          </Text>
+          <Text style={styles.listCardBody}>Language: {profile?.language || 'en'}</Text>
+        </View>
+        <View style={styles.softCard}>
+          <SectionTitle title="Profile" action={isEditing ? 'Editing' : 'Account details'} />
+          {!isEditing ? (
+            <>
+              <Text style={styles.listCardBody}>Update your name, mobile number, city, state, country, language, and password here. Email stays read-only.</Text>
+              <Pressable style={styles.secondaryWideButton} onPress={() => {
+                setFormError('');
+                setSuccessMessage('');
+                setIsEditing(true);
+              }}>
+                <Icon name="settings" size={16} color="#6d28d9" />
+                <Text style={styles.secondaryButtonText}>Edit profile</Text>
+              </Pressable>
+            </>
+          ) : (
+            <>
+              <TextField label="Full name" value={fullName} onChange={setFullName} placeholder="Your name" />
+              <TextField label="Email" value={email} onChange={setEmail} placeholder="Email" autoCapitalize="none" editable={false} />
+              <View style={styles.inputBlock}>
+                <Text style={styles.inputLabel}>Mobile number</Text>
+                <View style={styles.phoneRow}>
+                  <View style={styles.phoneCodeWrap}>
+                    <Pressable style={styles.phoneCodeButton} onPress={() => setShowCodePicker(current => !current)}>
+                      <Text style={styles.phoneCodeButtonText}>{selectedPhoneCode?.code || mobileCountryCode || '+91'}</Text>
+                      <Icon name="arrowRight" size={12} color="#6d28d9" />
+                    </Pressable>
+                    {showCodePicker ? (
+                      <View style={styles.phoneCodeDropdown}>
+                        {phoneCountryCodes.map(item => (
+                          <Pressable
+                            key={`${item.label}-${item.code}`}
+                            style={[styles.phoneCodeOption, mobileCountryCode === item.code && styles.phoneCodeOptionActive]}
+                            onPress={() => {
+                              setMobileCountryCode(item.code);
+                              setShowCodePicker(false);
+                            }}>
+                            <Text style={styles.phoneCodeOptionLabel}>{item.label}</Text>
+                            <Text style={styles.phoneCodeOptionCode}>{item.code}</Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                    ) : null}
+                  </View>
+                  <View style={styles.phoneNumberWrap}>
+                    <TextInput
+                      value={mobileNumber}
+                      onChangeText={setMobileNumber}
+                      placeholder="9876543210"
+                      autoCapitalize="none"
+                      keyboardType="phone-pad"
+                      placeholderTextColor="#9ca3af"
+                      style={styles.input}
+                    />
+                  </View>
+                </View>
+              </View>
+              <InlineSelect
+                label="Country"
+                value={country}
+                placeholder="Select country"
+                onToggle={() => {
+                  setShowStatePicker(false);
+                  setShowCityPicker(false);
+                  setShowCountryPicker(current => !current);
+                }}
+              />
+              <InlineSelect
+                label="State"
+                value={stateName}
+                placeholder={isIndiaSelected ? 'Select state' : 'Select country first'}
+                onToggle={() => {
+                  if (!isIndiaSelected) return;
+                  setShowCountryPicker(false);
+                  setShowCityPicker(false);
+                  setShowStatePicker(current => !current);
+                }}
+              />
+              <InlineSelect
+                label="City"
+                value={city}
+                placeholder={isIndiaSelected ? (stateName ? 'Select city' : 'Choose state first') : 'Select state first'}
+                onToggle={() => {
+                  if (!isIndiaSelected || !stateName) return;
+                  setShowCountryPicker(false);
+                  setShowStatePicker(false);
+                  setShowCityPicker(current => !current);
+                }}
+              />
+              <TextField label="Language" value={language} onChange={setLanguage} placeholder="en" autoCapitalize="none" />
+              <TextField label="New password" value={newPassword} onChange={setNewPassword} placeholder="Leave blank to keep current password" secure autoCapitalize="none" />
+              {formError ? <Text style={styles.errorText}>{formError}</Text> : null}
+              {successMessage ? (
+                <View style={styles.inlineInfoSuccess}>
+                  <Icon name="check" size={16} color="#047857" />
+                  <Text style={styles.inlineInfoText}>{successMessage}</Text>
+                </View>
+              ) : null}
+              <View style={styles.actionRow}>
+                <Pressable
+                  style={styles.secondaryButton}
+                  onPress={() => {
+                    setIsEditing(false);
+                    setFormError('');
+                    setNewPassword('');
+                    setShowCodePicker(false);
+                    setShowCountryPicker(false);
+                    setShowStatePicker(false);
+                    setShowCityPicker(false);
+                  }}>
+                  <Text style={styles.secondaryButtonText}>Cancel</Text>
+                </Pressable>
+                <Pressable style={[styles.primaryButton, isSaving && styles.loadingCard]} onPress={handleSaveProfile} disabled={isSaving}>
+                  <Text style={styles.primaryButtonText}>{isSaving ? 'Saving...' : 'Save changes'}</Text>
+                </Pressable>
+              </View>
+            </>
+          )}
         </View>
         <View style={styles.softCard}>
           <Text style={styles.listCardTitle}>Onboarding</Text>
@@ -1819,10 +2175,54 @@ function ProfileScreen({profile, onLogout}: {profile: RemoteAppProfile | null; o
             {profile?.onboarding?.completed ? 'Completed' : `Saved at step ${profile?.onboarding?.step || 'welcome'}`}
           </Text>
         </View>
+        {!isEditing && successMessage ? (
+          <View style={styles.inlineInfoSuccess}>
+            <Icon name="check" size={16} color="#047857" />
+            <Text style={styles.inlineInfoText}>{successMessage}</Text>
+          </View>
+        ) : null}
         <Pressable style={styles.secondaryButton} onPress={onLogout}>
           <Text style={styles.secondaryButtonText}>Log out</Text>
         </Pressable>
       </View>
+      <SelectionSheet
+        visible={showCountryPicker}
+        title="Select Country"
+        value={country}
+        options={profileCountries}
+        onClose={() => setShowCountryPicker(false)}
+        onSelect={value => {
+          setCountry(value);
+          setShowCountryPicker(false);
+          if (value !== 'India') {
+            setStateName('');
+            setCity('');
+          }
+        }}
+      />
+      <SelectionSheet
+        visible={showStatePicker && isIndiaSelected}
+        title="Select State"
+        value={stateName}
+        options={indiaStates}
+        onClose={() => setShowStatePicker(false)}
+        onSelect={value => {
+          setStateName(value);
+          setCity('');
+          setShowStatePicker(false);
+        }}
+      />
+      <SelectionSheet
+        visible={showCityPicker && isIndiaSelected && cityOptions.length > 0}
+        title="Select City"
+        value={city}
+        options={cityOptions}
+        onClose={() => setShowCityPicker(false)}
+        onSelect={value => {
+          setCity(value);
+          setShowCityPicker(false);
+        }}
+      />
     </Shell>
   );
 }
@@ -2156,9 +2556,9 @@ function OnboardingScreen({
         <View style={styles.cardList}>
           <Text style={styles.screenTitle}>Save your first reframe</Text>
           <Text style={styles.screenSubtitle}>Create your account to keep your conversations, reflections, and next steps in one place.</Text>
-          <TextField label="Full name" value={state.fullName} onChange={value => onFieldChange('fullName', value)} placeholder="Your name" autoCapitalize="words" />
-          <TextField label="Email" value={state.email} onChange={value => onFieldChange('email', value)} placeholder="you@example.com" autoCapitalize="none" />
-          <TextField label="Password" value={state.password} onChange={value => onFieldChange('password', value)} placeholder="At least 8 characters" secure autoCapitalize="none" />
+          <TextField label="Full name" value={state.fullName} onChange={value => onFieldChange('fullName', value)} placeholder="Your name" autoCapitalize="words" returnKeyType="next" />
+          <TextField label="Email" value={state.email} onChange={value => onFieldChange('email', value)} placeholder="you@example.com" autoCapitalize="none" returnKeyType="next" />
+          <TextField label="Password" value={state.password} onChange={value => onFieldChange('password', value)} placeholder="At least 8 characters" secure autoCapitalize="none" onSubmitEditing={onPrimaryAction} returnKeyType="done" />
           <View style={styles.secondaryWideButton}>
             <Icon name="mail" size={16} color="#4b5563" />
             <Text style={styles.secondaryButtonText}>Continue with Google</Text>
@@ -2263,7 +2663,7 @@ function OnboardingScreen({
   }
 
   return (
-    <Shell title="Onboarding" subtitle={`Step ${stepIndex + 1} of ${path.length}`} showBack={hasBack} rightSlot={<Badge label={`${Math.round(progress)}%`} tone="white" />}>
+    <Shell title="Onboarding" subtitle={`Step ${stepIndex + 1} of ${path.length}`} showBack={hasBack} onBack={onBack} rightSlot={<Badge label={`${Math.round(progress)}%`} tone="white" />}>
       <View style={styles.progressTrackTop}>
         <View style={[styles.progressFillTop, {width: `${progress}%`}]} />
       </View>
@@ -2319,15 +2719,15 @@ export default function App() {
   const appScreen = useMemo(() => {
     switch (activeTab) {
       case 'chat':
-        return <ChatScreen state={state} authToken={authToken} generatedReframe={generatedReframe} />;
+        return <ChatScreen state={state} authToken={authToken} generatedReframe={generatedReframe} onBack={() => setActiveTab('home')} />;
       case 'reports':
-        return <ReportsScreen authToken={authToken} />;
+        return <ReportsScreen authToken={authToken} onBack={() => setActiveTab('home')} />;
       case 'tools':
-        return <ToolsScreen />;
+        return <ToolsScreen onBack={() => setActiveTab('home')} />;
       case 'family':
-        return <FamilyScreen profiles={familyCards} />;
+        return <FamilyScreen profiles={familyCards} onBack={() => setActiveTab('home')} />;
       case 'profile':
-        return <ProfileScreen profile={appProfile} onLogout={handleLogout} />;
+        return <ProfileScreen profile={appProfile} authToken={authToken} onProfileUpdated={setAppProfile} onLogout={handleLogout} onBack={() => setActiveTab('home')} />;
       default:
         return <HomeScreen profile={appProfile} authToken={authToken} onOpenReports={() => setActiveTab('reports')} />;
     }
@@ -3074,16 +3474,12 @@ const styles = StyleSheet.create({
   loginLink: {fontSize: 14, color: '#6d28d9', fontWeight: '600', textAlign: 'center'},
   landingTrustText: {fontSize: 13, lineHeight: 18, color: '#6b7280', textAlign: 'center', marginTop: 16, paddingHorizontal: 12},
   appShell: {flex: 1, backgroundColor: '#fff4fb', paddingHorizontal: 16, paddingTop: 8},
-  topStatusRow: {flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 6},
-  timeText: {fontSize: 12, color: '#6b7280', fontWeight: '600'},
-  statusDots: {flexDirection: 'row', alignItems: 'center', gap: 4},
-  statusDotSmall: {width: 8, height: 8, borderRadius: 999, backgroundColor: '#111827'},
-  statusPill: {width: 24, height: 8, borderRadius: 999, backgroundColor: '#111827'},
-  notch: {alignSelf: 'center', width: 144, height: 28, borderRadius: 999, backgroundColor: '#111827', marginTop: 8},
   headerRow: {flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 20},
   headerLeft: {flexDirection: 'row', alignItems: 'center', flex: 1},
+  headerLeadGroup: {flexDirection: 'row', alignItems: 'center', gap: 10},
   backButton: {width: 40, height: 40, borderRadius: 20, backgroundColor: '#ffffff', alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 12, shadowOffset: {width: 0, height: 4}, elevation: 2},
   logoBadge: {width: 40, height: 40, borderRadius: 16, backgroundColor: '#8b5cf6', alignItems: 'center', justifyContent: 'center', shadowColor: '#7c3aed', shadowOpacity: 0.35, shadowRadius: 14, shadowOffset: {width: 0, height: 6}, elevation: 4},
+  logoBadgeSmall: {width: 34, height: 34, borderRadius: 14, backgroundColor: '#8b5cf6', alignItems: 'center', justifyContent: 'center', shadowColor: '#7c3aed', shadowOpacity: 0.28, shadowRadius: 10, shadowOffset: {width: 0, height: 4}, elevation: 3},
   headerTextWrap: {marginLeft: 12, flex: 1},
   headerTitle: {fontSize: 24, fontWeight: '700', color: '#111827'},
   headerSubtitle: {fontSize: 13, color: '#6b7280', marginTop: 2},
@@ -3123,12 +3519,7 @@ const styles = StyleSheet.create({
   progressFillTop: {height: '100%', backgroundColor: '#7c3aed', borderRadius: 999},
   miniChartWrap: {marginTop: 8, backgroundColor: '#f8f4ff', borderRadius: 18, padding: 12},
   reportChartWrap: {marginTop: 12, backgroundColor: '#f8f4ff', borderRadius: 18, padding: 12},
-  chartArea: {position: 'relative', width: '100%', overflow: 'hidden', justifyContent: 'center'},
-  chartGridLine: {position: 'absolute', left: 0, right: 0, height: 1, backgroundColor: '#e9d5ff'},
-  chartSegment: {position: 'absolute', height: 3, backgroundColor: '#7c3aed', borderRadius: 999, transformOrigin: 'left center'},
-  chartPointWrap: {position: 'absolute', marginLeft: -6, marginTop: -6, alignItems: 'center'},
-  chartPoint: {width: 12, height: 12, borderRadius: 999, backgroundColor: '#7c3aed', borderWidth: 2, borderColor: '#ffffff'},
-  chartLabel: {fontSize: 9, color: '#6b7280', marginTop: 6},
+  chartArea: {width: '100%', overflow: 'hidden', justifyContent: 'center'},
   cardList: {gap: 12},
   listCard: {flexDirection: 'row', alignItems: 'center', gap: 14, backgroundColor: 'rgba(255,255,255,0.94)', borderRadius: 24, padding: 16},
   toolIconTile: {width: 44, height: 44, borderRadius: 16, backgroundColor: '#ede9fe', alignItems: 'center', justifyContent: 'center'},
@@ -3147,6 +3538,33 @@ const styles = StyleSheet.create({
   inputBlock: {gap: 8},
   inputLabel: {fontSize: 14, fontWeight: '600', color: '#374151'},
   input: {backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 18, paddingHorizontal: 14, paddingVertical: 12, color: '#111827', fontSize: 14},
+  inputDisabled: {backgroundColor: '#f3f4f6', color: '#6b7280'},
+  phoneRow: {flexDirection: 'row', gap: 10, alignItems: 'flex-start'},
+  phoneCodeWrap: {width: 116, position: 'relative', zIndex: 5},
+  phoneCodeButton: {backgroundColor: '#f5f3ff', borderWidth: 1, borderColor: '#ddd6fe', borderRadius: 18, paddingHorizontal: 12, paddingVertical: 13, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between'},
+  phoneCodeButtonText: {fontSize: 14, fontWeight: '600', color: '#6d28d9'},
+  phoneCodeDropdown: {position: 'absolute', top: 54, left: 0, right: 0, backgroundColor: '#ffffff', borderRadius: 18, borderWidth: 1, borderColor: '#e5e7eb', paddingVertical: 6, shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 10, shadowOffset: {width: 0, height: 4}, elevation: 4},
+  phoneCodeOption: {paddingHorizontal: 12, paddingVertical: 10, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8},
+  phoneCodeOptionActive: {backgroundColor: '#f5f3ff'},
+  phoneCodeOptionLabel: {flex: 1, fontSize: 12, color: '#4b5563'},
+  phoneCodeOptionCode: {fontSize: 13, fontWeight: '700', color: '#6d28d9'},
+  phoneNumberWrap: {flex: 1},
+  inlineSelectButton: {backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 18, paddingHorizontal: 14, paddingVertical: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8},
+  inlineSelectValue: {flex: 1, fontSize: 14, color: '#111827'},
+  inlineSelectPlaceholder: {color: '#9ca3af'},
+  sheetBackdrop: {flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(17,24,39,0.28)'},
+  sheetScrim: {flex: 1},
+  sheetCard: {maxHeight: '72%', backgroundColor: '#ffffff', borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingTop: 14, paddingHorizontal: 16, paddingBottom: Platform.OS === 'ios' ? 28 : 16},
+  sheetHeader: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8},
+  sheetTitle: {fontSize: 18, fontWeight: '700', color: '#111827'},
+  sheetCloseButton: {paddingVertical: 8, paddingHorizontal: 10},
+  sheetCloseText: {fontSize: 14, fontWeight: '600', color: '#6d28d9'},
+  sheetList: {flexGrow: 0},
+  sheetListContent: {paddingBottom: 12},
+  sheetOption: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, paddingVertical: 14, borderRadius: 16},
+  sheetOptionActive: {backgroundColor: '#f5f3ff'},
+  sheetOptionText: {flex: 1, fontSize: 15, color: '#374151'},
+  sheetOptionTextActive: {color: '#6d28d9', fontWeight: '600'},
   textarea: {minHeight: 140, textAlignVertical: 'top'},
   goalGrid: {flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 8},
   goalPill: {width: '48%', backgroundColor: 'rgba(255,255,255,0.94)', borderRadius: 18, paddingHorizontal: 14, paddingVertical: 14},
