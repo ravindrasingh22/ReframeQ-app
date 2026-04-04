@@ -1,4 +1,4 @@
-import {buildApiUrl} from '../config/appConfig';
+import {apiRequest} from './api';
 
 export type OnboardingAIStep =
   | 'goal_microcopy'
@@ -88,15 +88,11 @@ export async function generateOnboardingAI(
   if (token) {
     headers.Authorization = `Bearer ${token}`;
   }
-  const response = await fetch(buildApiUrl('/api/app/onboarding/ai/generate'), {
+  const data = await apiRequest<{step: OnboardingAIStep; result: OnboardingAIResult; model?: string}>('/api/app/onboarding/ai/generate', {
     method: 'POST',
     headers,
     body: JSON.stringify(payload),
   });
-  const data = await response.json();
-  if (!response.ok) {
-    throw new Error(typeof data?.detail === 'string' ? data.detail : 'Onboarding AI request failed');
-  }
   return {
     step: data.step as OnboardingAIStep,
     result: data.result as OnboardingAIResult,

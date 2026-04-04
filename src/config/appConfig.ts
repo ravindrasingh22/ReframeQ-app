@@ -1,4 +1,4 @@
-const DEFAULT_API_BASE_URL = 'http://192.168.29.120:8001';
+const DEFAULT_API_BASE_URL = 'http://192.168.1.6:8001';
 
 function normalizeBaseUrl(value: string): string {
   return value.replace(/\/+$/, '');
@@ -9,6 +9,7 @@ function readEnv(name: string): string | undefined {
   const value = env[name]?.trim();
   return value ? value : undefined;
 }
+
 
 const apiBaseUrl = normalizeBaseUrl(
   readEnv('EXPO_PUBLIC_API_BASE_URL') ?? DEFAULT_API_BASE_URL,

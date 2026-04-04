@@ -1,4 +1,4 @@
-import {buildApiUrl} from '../config/appConfig';
+import {apiRequest} from './api';
 
 type Language = 'en' | 'hinglish';
 
@@ -39,7 +39,7 @@ export async function getAssistantReplyFromBackend(
   language: Language,
   threadId?: number,
 ): Promise<string> {
-  const response = await fetch(buildApiUrl('/api/app/chat/message'), {
+  const data = await apiRequest<{reply?: string}>('/api/app/chat/message', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -47,10 +47,6 @@ export async function getAssistantReplyFromBackend(
     },
     body: JSON.stringify({message, language, thread_id: threadId}),
   });
-  const data = await response.json();
-  if (!response.ok) {
-    throw new Error(typeof data?.detail === 'string' ? data.detail : 'Chat request failed');
-  }
   return String(data?.reply ?? '');
 }
 
@@ -70,13 +66,9 @@ export type ChatThreadMessage = {
 };
 
 export async function fetchThreads(token: string): Promise<ChatThread[]> {
-  const response = await fetch(buildApiUrl('/api/app/chat/threads'), {
+  const data = await apiRequest<{items?: ChatThread[]}>('/api/app/chat/threads', {
     headers: {Authorization: `Bearer ${token}`},
   });
-  const data = await response.json();
-  if (!response.ok) {
-    throw new Error(typeof data?.detail === 'string' ? data.detail : 'Failed to load threads');
-  }
   return (data?.items ?? []) as ChatThread[];
 }
 
@@ -84,13 +76,9 @@ export async function fetchThreadDetail(
   token: string,
   threadId: number,
 ): Promise<{thread: ChatThread; messages: ChatThreadMessage[]}> {
-  const response = await fetch(buildApiUrl(`/api/app/chat/threads/${threadId}`), {
+  const data = await apiRequest<{thread: ChatThread; messages?: any[] }>(`/api/app/chat/threads/${threadId}`, {
     headers: {Authorization: `Bearer ${token}`},
   });
-  const data = await response.json();
-  if (!response.ok) {
-    throw new Error(typeof data?.detail === 'string' ? data.detail : 'Failed to load thread');
-  }
   return {
     thread: data.thread as ChatThread,
     messages: (data.messages ?? []).map((m: any) => ({
@@ -107,19 +95,53 @@ export async function sendChatMessage(
   message: string,
   language: Language,
   threadId?: number,
-): Promise<{reply: string; thread_id: number; thread_title: string}> {
-  const response = await fetch(buildApiUrl('/api/app/chat/message'), {
+): Promise<{
+  reply: string;
+  thread_id: number;
+  thread_title: string;
+  safety_decision: {
+    risk_score: 'low' | 'medium' | 'high' | 'critical';
+    safety_level: 'support' | 'heightened_support' | 'crisis_danger';
+    trigger_codes: string[];
+    recommended_action: string;
+    requires_interrupt: boolean;
+    feature_applied: boolean;
+  };
+  support_card?: {
+    title: string;
+    body: string;
+    actions: Array<{kind: string; label: string; value: string}>;
+  } | null;
+}> {
+  const data = await apiRequest<any>('/api/app/chat/message', {
     method: 'POST',
     headers: {'Content-Type': 'application/json', Authorization: `Bearer ${token}`},
     body: JSON.stringify({message, language, thread_id: threadId}),
   });
-  const data = await response.json();
-  if (!response.ok) {
-    throw new Error(typeof data?.detail === 'string' ? data.detail : 'Chat request failed');
-  }
   return {
     reply: String(data.reply ?? ''),
     thread_id: Number(data.thread_id),
     thread_title: String(data.thread_title ?? ''),
+    safety_decision: {
+      risk_score: String(data?.safety_decision?.risk_score ?? 'low') as 'low' | 'medium' | 'high' | 'critical',
+      safety_level: String(data?.safety_decision?.safety_level ?? 'support') as 'support' | 'heightened_support' | 'crisis_danger',
+      trigger_codes: Array.isArray(data?.safety_decision?.trigger_codes) ? data.safety_decision.trigger_codes.map(String) : [],
+      recommended_action: String(data?.safety_decision?.recommended_action ?? 'continue'),
+      requires_interrupt: Boolean(data?.safety_decision?.requires_interrupt),
+      feature_applied: Boolean(data?.safety_decision?.feature_applied),
+    },
+    support_card: data?.support_card
+      ? {
+          title: String(data.support_card.title ?? ''),
+          body: String(data.support_card.body ?? ''),
+          actions: Array.isArray(data.support_card.actions)
+            ? data.support_card.actions.map((item: any) => ({
+                kind: String(item?.kind ?? ''),
+                label: String(item?.label ?? ''),
+                value: String(item?.value ?? ''),
+              }))
+            : [],
+        }
+      : null,
   };
 }

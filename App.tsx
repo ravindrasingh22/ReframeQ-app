@@ -1,5 +1,7 @@
 import React, {useEffect, useMemo, useState} from 'react';
 import {
+  Keyboard,
+  Linking,
   Modal,
   Platform,
   Pressable,
@@ -13,6 +15,7 @@ import {
 } from 'react-native';
 import Svg, {Circle, Line, Path, Text as SvgText} from 'react-native-svg';
 import {loginApp, registerApp} from './src/services/AppAuthService';
+import {isUnauthorizedError, readSessionValue, removeSessionValue, setUnauthorizedHandler, writeSessionValue} from './src/services/api';
 import {createMyProfile, fetchMyProfiles, recordChildConsent} from './src/services/FamilyService';
 import {generateOnboardingAI, type OnboardingAIRequest, type OnboardingAIResult} from './src/services/OnboardingAIService';
 import {fetchOnboardingConfig, fetchOnboardingState, saveOnboardingState, scanOnboardingSafety, validateInviteCode, type OnboardingConfig, type PersistedOnboardingState} from './src/services/OnboardingService';
@@ -578,10 +581,9 @@ function clearLocalDraft() {
   window.localStorage.removeItem(ONBOARDING_DRAFT_KEY);
 }
 
-function loadAppSession(): {token: string; activeTab: TabId} | null {
-  if (Platform.OS !== 'web' || typeof window === 'undefined' || !window.localStorage) return null;
+async function loadAppSession(): Promise<{token: string; activeTab: TabId} | null> {
   try {
-    const raw = window.localStorage.getItem(APP_SESSION_KEY);
+    const raw = await readSessionValue(APP_SESSION_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as {token?: string; activeTab?: TabId};
     if (!parsed.token) return null;
@@ -594,14 +596,12 @@ function loadAppSession(): {token: string; activeTab: TabId} | null {
   }
 }
 
-function saveAppSession(token: string, activeTab: TabId) {
-  if (Platform.OS !== 'web' || typeof window === 'undefined' || !window.localStorage) return;
-  window.localStorage.setItem(APP_SESSION_KEY, JSON.stringify({token, activeTab}));
+async function saveAppSession(token: string, activeTab: TabId) {
+  await writeSessionValue(APP_SESSION_KEY, JSON.stringify({token, activeTab}));
 }
 
-function clearAppSession() {
-  if (Platform.OS !== 'web' || typeof window === 'undefined' || !window.localStorage) return;
-  window.localStorage.removeItem(APP_SESSION_KEY);
+async function clearAppSession() {
+  await removeSessionValue(APP_SESSION_KEY);
 }
 
 function validateEmail(email: string) {
@@ -912,7 +912,7 @@ function Shell({
           </View>
           <View style={styles.headerRight}>{rightSlot ?? <Icon name="bell" size={18} color="#6b7280" />}</View>
         </View>
-        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
           {children}
         </ScrollView>
       </View>
@@ -1137,23 +1137,43 @@ function SelectionSheet({
   onClose: () => void;
   onSelect: (value: string) => void;
 }) {
+  useEffect(() => {
+    if (visible) {
+      Keyboard.dismiss();
+    }
+  }, [visible]);
+
+  function handleClose() {
+    Keyboard.dismiss();
+    onClose();
+  }
+
+  function handleSelect(nextValue: string) {
+    Keyboard.dismiss();
+    onSelect(nextValue);
+  }
+
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
       <View style={styles.sheetBackdrop}>
-        <Pressable style={styles.sheetScrim} onPress={onClose} />
+        <Pressable style={styles.sheetScrim} onPress={handleClose} />
         <View style={styles.sheetCard}>
           <View style={styles.sheetHeader}>
             <Text style={styles.sheetTitle}>{title}</Text>
-            <Pressable onPress={onClose} style={styles.sheetCloseButton}>
+            <Pressable onPress={handleClose} style={styles.sheetCloseButton}>
               <Text style={styles.sheetCloseText}>Close</Text>
             </Pressable>
           </View>
-          <ScrollView style={styles.sheetList} contentContainerStyle={styles.sheetListContent} showsVerticalScrollIndicator={false}>
+          <ScrollView
+            style={styles.sheetList}
+            contentContainerStyle={styles.sheetListContent}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled">
             {options.map(option => (
               <Pressable
                 key={option}
                 style={[styles.sheetOption, value === option && styles.sheetOptionActive]}
-                onPress={() => onSelect(option)}>
+                onPress={() => handleSelect(option)}>
                 <Text style={[styles.sheetOptionText, value === option && styles.sheetOptionTextActive]}>{option}</Text>
                 {value === option ? <Icon name="check" size={14} color="#6d28d9" /> : null}
               </Pressable>
@@ -1605,6 +1625,8 @@ function moodEmojiFor(moodId: string): string {
       return '😣';
     case 'confused':
       return '😕';
+    case 'okay':
+      return '😐';
     case 'better':
       return '🙂';
     case 'calm':
@@ -1713,11 +1735,13 @@ function MoodLineChart({points, height, showLabels}: {points: MoodTrendPoint[]; 
 }
 
 function ChatScreen({
+  profile,
   state,
   authToken,
   generatedReframe,
   onBack,
 }: {
+  profile: RemoteAppProfile | null;
   state: OnboardingState;
   authToken: string;
   generatedReframe: GeneratedReframe | null;
@@ -1729,6 +1753,11 @@ function ChatScreen({
   const [loadingThread, setLoadingThread] = useState(false);
   const [sendingMessage, setSendingMessage] = useState(false);
   const [chatError, setChatError] = useState('');
+  const [supportCard, setSupportCard] = useState<{
+    title: string;
+    body: string;
+    actions: Array<{kind: string; label: string; value: string}>;
+  } | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -1806,6 +1835,7 @@ function ChatScreen({
       setSendingMessage(true);
       const result = await sendChatMessage(authToken, nextText, state.language, threadId ?? undefined);
       setThreadId(result.thread_id);
+      setSupportCard(result.safety_decision.feature_applied ? (result.support_card ?? null) : null);
       setMessages(current => [
         ...current,
         {
@@ -1849,8 +1879,41 @@ function ChatScreen({
         <View style={styles.coachSafetyCard}>
           <Icon name="shieldCheck" size={18} color="#b45309" />
           <Text style={styles.coachSafetyText}>
-            If this starts feeling unsafe or overwhelming, pause here and reach out to a trusted person or local professional support.
+            If this starts feeling unsafe or overwhelming, pause here and reach out to a trusted person or local support right away.
           </Text>
+        </View>
+      ) : null}
+      {supportCard ? (
+        <View style={styles.supportScreenCard}>
+          <Text style={styles.listCardTitle}>{supportCard.title}</Text>
+          <Text style={styles.listCardBody}>{supportCard.body}</Text>
+          <View style={styles.supportActionsWrap}>
+            {supportCard.actions.map(action => (
+              <Pressable
+                key={`${action.kind}-${action.label}-${action.value}`}
+                style={action.kind === 'acknowledge' ? styles.secondaryWideButton : styles.primaryWideButton}
+                onPress={() => {
+                  if (action.kind === 'acknowledge') {
+                    setSupportCard(null);
+                    return;
+                  }
+                  if (action.kind === 'link' && action.value) {
+                    Linking.openURL(action.value).catch(() => undefined);
+                    return;
+                  }
+                  if ((action.kind === 'call' || action.kind === 'contact') && action.value) {
+                    Linking.openURL(`tel:${action.value}`).catch(() => undefined);
+                  }
+                }}>
+                <Text style={action.kind === 'acknowledge' ? styles.secondaryButtonText : styles.primaryButtonText}>{action.label}</Text>
+              </Pressable>
+            ))}
+          </View>
+          {!profile?.emergency_support?.profile_complete && profile?.emergency_support?.enabled ? (
+            <Text style={styles.coachSafetyText}>
+              Add a trusted contact in Profile so ReframeQ can show faster support options here.
+            </Text>
+          ) : null}
         </View>
       ) : null}
       <View style={styles.chatStack}>
@@ -1870,22 +1933,26 @@ function ChatScreen({
           </View>
         ) : null}
       </View>
-      <View style={styles.quickReplyGuide}>
-        <Text style={styles.quickReplyGuideTitle}>Coach prompts</Text>
-        <Text style={styles.quickReplyGuideBody}>These are reflection helpers. They should shape your response, not replace it.</Text>
-      </View>
-      <View style={styles.quickReplyWrap}>
-        {quickReplies.map(reply => (
-          <Pressable key={reply} onPress={() => setDraft(buildReflectionDraft(summary.patternLabel, reply))} style={styles.quickReplyChip}>
-            <Text style={styles.quickReplyText}>{reply}</Text>
-          </Pressable>
-        ))}
-      </View>
+      {!supportCard ? (
+        <>
+          <View style={styles.quickReplyGuide}>
+            <Text style={styles.quickReplyGuideTitle}>Coach prompts</Text>
+            <Text style={styles.quickReplyGuideBody}>These are reflection helpers. They should shape your response, not replace it.</Text>
+          </View>
+          <View style={styles.quickReplyWrap}>
+            {quickReplies.map(reply => (
+              <Pressable key={reply} onPress={() => setDraft(buildReflectionDraft(summary.patternLabel, reply))} style={styles.quickReplyChip}>
+                <Text style={styles.quickReplyText}>{reply}</Text>
+              </Pressable>
+            ))}
+          </View>
+        </>
+      ) : null}
       <View style={styles.chatComposer}>
         <TextInput
           value={draft}
           onChangeText={setDraft}
-          placeholder="Share the thought you want to test..."
+          placeholder={supportCard ? 'If you are safe for now, you can add a short update here...' : 'Share the thought you want to test...'}
           placeholderTextColor="#9ca3af"
           multiline
           style={styles.chatComposerInput}
@@ -1957,6 +2024,7 @@ function ProfileScreen({
   const displayName = profile?.full_name || 'Profile';
   const initial = displayName.charAt(0).toUpperCase() || 'R';
   const [isEditing, setIsEditing] = useState(false);
+  const [editSection, setEditSection] = useState<'account' | 'trustedContacts'>('account');
   const [fullName, setFullName] = useState(profile?.full_name || '');
   const [email, setEmail] = useState(profile?.email || '');
   const [mobileCountryCode, setMobileCountryCode] = useState(profile?.mobile_country_code || '');
@@ -1971,8 +2039,10 @@ function ProfileScreen({
   const [showStatePicker, setShowStatePicker] = useState(false);
   const [showCityPicker, setShowCityPicker] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isSavingTrustedContacts, setIsSavingTrustedContacts] = useState(false);
   const [formError, setFormError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const [trustedContacts, setTrustedContacts] = useState<RemoteAppProfile['emergency_support']['trusted_contacts']>([]);
 
   useEffect(() => {
     setFullName(profile?.full_name || '');
@@ -1983,6 +2053,8 @@ function ProfileScreen({
     setStateName(profile?.state || '');
     setCountry(profile?.country || '');
     setLanguage(profile?.language || 'en');
+    setTrustedContacts(profile?.emergency_support?.trusted_contacts || []);
+    setEditSection('account');
   }, [profile]);
 
   async function handleSaveProfile() {
@@ -2008,6 +2080,19 @@ function ProfileScreen({
         state: stateName.trim(),
         country: country.trim(),
         language: language.trim() || 'en',
+        emergency_support: profile?.emergency_support?.enabled
+          ? {
+              trusted_contacts: trustedContacts
+                .filter(item => item.name.trim())
+                .slice(0, 3)
+                .map((item, index) => ({
+                  ...item,
+                  is_primary: trustedContacts.some(entry => entry.is_primary)
+                    ? Boolean(item.is_primary)
+                    : index === 0,
+                })),
+            }
+          : undefined,
       });
       if (newPassword.trim()) {
         await changeMyPassword(authToken, newPassword.trim());
@@ -2023,9 +2108,45 @@ function ProfileScreen({
     }
   }
 
+  async function handleSaveTrustedContacts() {
+    if (!authToken || !profile?.emergency_support?.enabled) return;
+    setFormError('');
+    setSuccessMessage('');
+    const cleanedContacts = trustedContacts.filter(item => item.name.trim()).slice(0, 3);
+    if (!cleanedContacts.length) {
+      setFormError('Add at least one trusted contact name before saving.');
+      return;
+    }
+
+    setIsSavingTrustedContacts(true);
+    try {
+      const updatedProfile = await updateMyProfile(authToken, {
+        emergency_support: {
+          trusted_contacts: cleanedContacts.map((item, index) => ({
+            ...item,
+            is_primary: cleanedContacts.some(entry => entry.is_primary)
+              ? Boolean(item.is_primary)
+              : index === 0,
+          })),
+        },
+      });
+      onProfileUpdated(updatedProfile);
+      setTrustedContacts(updatedProfile.emergency_support?.trusted_contacts || []);
+      setIsEditing(false);
+      setSuccessMessage('Trusted contacts saved.');
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : 'Failed to save trusted contacts');
+    } finally {
+      setIsSavingTrustedContacts(false);
+    }
+  }
+
   const selectedPhoneCode = phoneCountryCodes.find(item => item.code === mobileCountryCode);
   const isIndiaSelected = country.trim().toLowerCase() === 'india';
   const cityOptions = stateName ? (indiaLocations[stateName] ?? []) : [];
+  const supportEnabled = Boolean(profile?.emergency_support?.enabled && profile?.emergency_support?.eligible);
+  const supportResource = profile?.emergency_support?.resource;
+  const canAddTrustedContact = trustedContacts.length < 3;
 
   return (
     <Shell title="Profile" subtitle="Preferences, privacy, and account" showBack onBack={onBack} rightSlot={<Icon name="settings" size={18} color="#6b7280" />}>
@@ -2060,6 +2181,7 @@ function ProfileScreen({
                 setFormError('');
                 setSuccessMessage('');
                 setIsEditing(true);
+                setEditSection('account');
               }}>
                 <Icon name="settings" size={16} color="#6d28d9" />
                 <Text style={styles.secondaryButtonText}>Edit profile</Text>
@@ -2067,80 +2189,184 @@ function ProfileScreen({
             </>
           ) : (
             <>
-              <TextField label="Full name" value={fullName} onChange={setFullName} placeholder="Your name" />
-              <TextField label="Email" value={email} onChange={setEmail} placeholder="Email" autoCapitalize="none" editable={false} />
-              <View style={styles.inputBlock}>
-                <Text style={styles.inputLabel}>Mobile number</Text>
-                <View style={styles.phoneRow}>
-                  <View style={styles.phoneCodeWrap}>
-                    <Pressable style={styles.phoneCodeButton} onPress={() => setShowCodePicker(current => !current)}>
-                      <Text style={styles.phoneCodeButtonText}>{selectedPhoneCode?.code || mobileCountryCode || '+91'}</Text>
-                      <Icon name="arrowRight" size={12} color="#6d28d9" />
-                    </Pressable>
-                    {showCodePicker ? (
-                      <View style={styles.phoneCodeDropdown}>
-                        {phoneCountryCodes.map(item => (
-                          <Pressable
-                            key={`${item.label}-${item.code}`}
-                            style={[styles.phoneCodeOption, mobileCountryCode === item.code && styles.phoneCodeOptionActive]}
-                            onPress={() => {
-                              setMobileCountryCode(item.code);
-                              setShowCodePicker(false);
-                            }}>
-                            <Text style={styles.phoneCodeOptionLabel}>{item.label}</Text>
-                            <Text style={styles.phoneCodeOptionCode}>{item.code}</Text>
-                          </Pressable>
-                        ))}
-                      </View>
-                    ) : null}
-                  </View>
-                  <View style={styles.phoneNumberWrap}>
-                    <TextInput
-                      value={mobileNumber}
-                      onChangeText={setMobileNumber}
-                      placeholder="9876543210"
-                      autoCapitalize="none"
-                      keyboardType="phone-pad"
-                      placeholderTextColor="#9ca3af"
-                      style={styles.input}
-                    />
-                  </View>
-                </View>
+              <View style={styles.editSectionTabs}>
+                <Pressable
+                  style={[styles.editSectionTab, editSection === 'account' && styles.editSectionTabActive]}
+                  onPress={() => setEditSection('account')}>
+                  <Text style={[styles.editSectionTabText, editSection === 'account' && styles.editSectionTabTextActive]}>Account</Text>
+                </Pressable>
+                {supportEnabled ? (
+                  <Pressable
+                    style={[styles.editSectionTab, editSection === 'trustedContacts' && styles.editSectionTabActive]}
+                    onPress={() => setEditSection('trustedContacts')}>
+                    <Text style={[styles.editSectionTabText, editSection === 'trustedContacts' && styles.editSectionTabTextActive]}>Trusted Contacts</Text>
+                  </Pressable>
+                ) : null}
               </View>
-              <InlineSelect
-                label="Country"
-                value={country}
-                placeholder="Select country"
-                onToggle={() => {
-                  setShowStatePicker(false);
-                  setShowCityPicker(false);
-                  setShowCountryPicker(current => !current);
-                }}
-              />
-              <InlineSelect
-                label="State"
-                value={stateName}
-                placeholder={isIndiaSelected ? 'Select state' : 'Select country first'}
-                onToggle={() => {
-                  if (!isIndiaSelected) return;
-                  setShowCountryPicker(false);
-                  setShowCityPicker(false);
-                  setShowStatePicker(current => !current);
-                }}
-              />
-              <InlineSelect
-                label="City"
-                value={city}
-                placeholder={isIndiaSelected ? (stateName ? 'Select city' : 'Choose state first') : 'Select state first'}
-                onToggle={() => {
-                  if (!isIndiaSelected || !stateName) return;
-                  setShowCountryPicker(false);
-                  setShowStatePicker(false);
-                  setShowCityPicker(current => !current);
-                }}
-              />
-              <TextField label="Language" value={language} onChange={setLanguage} placeholder="en" autoCapitalize="none" />
-              <TextField label="New password" value={newPassword} onChange={setNewPassword} placeholder="Leave blank to keep current password" secure autoCapitalize="none" />
+              {editSection === 'account' ? (
+                <>
+                  <TextField label="Full name" value={fullName} onChange={setFullName} placeholder="Your name" />
+                  <TextField label="Email" value={email} onChange={setEmail} placeholder="Email" autoCapitalize="none" editable={false} />
+                  <View style={styles.inputBlock}>
+                    <Text style={styles.inputLabel}>Mobile number</Text>
+                    <View style={styles.phoneRow}>
+                      <View style={styles.phoneCodeWrap}>
+                        <Pressable
+                          style={styles.phoneCodeButton}
+                          onPress={() => {
+                            Keyboard.dismiss();
+                            setShowCodePicker(current => !current);
+                          }}>
+                          <Text style={styles.phoneCodeButtonText}>{selectedPhoneCode?.code || mobileCountryCode || '+91'}</Text>
+                          <Icon name="arrowRight" size={12} color="#6d28d9" />
+                        </Pressable>
+                        {showCodePicker ? (
+                          <View style={styles.phoneCodeDropdown}>
+                            {phoneCountryCodes.map(item => (
+                              <Pressable
+                                key={`${item.label}-${item.code}`}
+                                style={[styles.phoneCodeOption, mobileCountryCode === item.code && styles.phoneCodeOptionActive]}
+                                onPress={() => {
+                                  setMobileCountryCode(item.code);
+                                  setShowCodePicker(false);
+                                }}>
+                                <Text style={styles.phoneCodeOptionLabel}>{item.label}</Text>
+                                <Text style={styles.phoneCodeOptionCode}>{item.code}</Text>
+                              </Pressable>
+                            ))}
+                          </View>
+                        ) : null}
+                      </View>
+                      <View style={styles.phoneNumberWrap}>
+                        <TextInput
+                          value={mobileNumber}
+                          onChangeText={setMobileNumber}
+                          placeholder="9876543210"
+                          autoCapitalize="none"
+                          keyboardType="phone-pad"
+                          placeholderTextColor="#9ca3af"
+                          style={styles.input}
+                        />
+                      </View>
+                    </View>
+                  </View>
+                  <InlineSelect
+                    label="Country"
+                    value={country}
+                    placeholder="Select country"
+                    onToggle={() => {
+                      Keyboard.dismiss();
+                      setShowStatePicker(false);
+                      setShowCityPicker(false);
+                      setShowCountryPicker(current => !current);
+                    }}
+                  />
+                  <InlineSelect
+                    label="State"
+                    value={stateName}
+                    placeholder={isIndiaSelected ? 'Select state' : 'Select country first'}
+                    onToggle={() => {
+                      Keyboard.dismiss();
+                      if (!isIndiaSelected) return;
+                      setShowCountryPicker(false);
+                      setShowCityPicker(false);
+                      setShowStatePicker(current => !current);
+                    }}
+                  />
+                  <InlineSelect
+                    label="City"
+                    value={city}
+                    placeholder={isIndiaSelected ? (stateName ? 'Select city' : 'Choose state first') : 'Select state first'}
+                    onToggle={() => {
+                      Keyboard.dismiss();
+                      if (!isIndiaSelected || !stateName) return;
+                      setShowCountryPicker(false);
+                      setShowStatePicker(false);
+                      setShowCityPicker(current => !current);
+                    }}
+                  />
+                  <TextField label="Language" value={language} onChange={setLanguage} placeholder="en" autoCapitalize="none" />
+                  <TextField label="New password" value={newPassword} onChange={setNewPassword} placeholder="Leave blank to keep current password" secure autoCapitalize="none" />
+                </>
+              ) : (
+                <View style={styles.contactStack}>
+                  <Text style={styles.listCardBody}>Add up to 3 trusted contacts that can be shown quickly if you need support.</Text>
+                  {trustedContacts.map((contact, index) => (
+                    <View key={contact.id || `trusted-contact-${index}`} style={styles.contactCard}>
+                      <TextField
+                        label={`Trusted contact ${index + 1} name`}
+                        value={contact.name}
+                        onChange={value => setTrustedContacts(current => current.map((item, itemIndex) => itemIndex === index ? {...item, name: value} : item))}
+                        placeholder="Full name"
+                      />
+                      <TextField
+                        label="Relationship"
+                        value={contact.relationship}
+                        onChange={value => setTrustedContacts(current => current.map((item, itemIndex) => itemIndex === index ? {...item, relationship: value} : item))}
+                        placeholder="Friend, sibling, spouse"
+                      />
+                      <TextField
+                        label="Phone"
+                        value={contact.phone_number}
+                        onChange={value => setTrustedContacts(current => current.map((item, itemIndex) => itemIndex === index ? {...item, phone_number: value} : item))}
+                        placeholder="9876543210"
+                        autoCapitalize="none"
+                      />
+                      <TextField
+                        label="Email"
+                        value={contact.email}
+                        onChange={value => setTrustedContacts(current => current.map((item, itemIndex) => itemIndex === index ? {...item, email: value} : item))}
+                        placeholder="Optional"
+                        autoCapitalize="none"
+                      />
+                      <TextField
+                        label="Support note"
+                        value={contact.support_note}
+                        onChange={value => setTrustedContacts(current => current.map((item, itemIndex) => itemIndex === index ? {...item, support_note: value} : item))}
+                        placeholder="Example: Please call and stay on the line with me."
+                      />
+                      <View style={styles.actionRow}>
+                        <Pressable
+                          style={[styles.secondaryButton, contact.is_primary && styles.loadingCard]}
+                          onPress={() => setTrustedContacts(current => current.map((item, itemIndex) => ({...item, is_primary: itemIndex === index})))}>
+                          <Text style={styles.secondaryButtonText}>{contact.is_primary ? 'Primary contact' : 'Make primary'}</Text>
+                        </Pressable>
+                        <Pressable
+                          style={styles.secondaryButton}
+                          onPress={() => setTrustedContacts(current => current.filter((_, itemIndex) => itemIndex !== index))}>
+                          <Text style={styles.secondaryButtonText}>Remove</Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                  ))}
+                  {canAddTrustedContact ? (
+                    <Pressable
+                      style={styles.secondaryWideButton}
+                      onPress={() =>
+                        setTrustedContacts(current => [
+                          ...current,
+                          {
+                            id: `contact-${Date.now()}`,
+                            name: '',
+                            relationship: '',
+                            phone_number: '',
+                            email: '',
+                            preferred_language: language || 'en',
+                            city: city || '',
+                            state: stateName || '',
+                            is_primary: current.length === 0,
+                            show_call_shortcut: true,
+                            support_note: '',
+                            active: true,
+                          },
+                        ])
+                      }>
+                      <Icon name="plus" size={16} color="#6d28d9" />
+                      <Text style={styles.secondaryButtonText}>Add trusted contact</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+              )}
               {formError ? <Text style={styles.errorText}>{formError}</Text> : null}
               {successMessage ? (
                 <View style={styles.inlineInfoSuccess}>
@@ -2155,6 +2381,8 @@ function ProfileScreen({
                     setIsEditing(false);
                     setFormError('');
                     setNewPassword('');
+                    setTrustedContacts(profile?.emergency_support?.trusted_contacts || []);
+                    setEditSection('account');
                     setShowCodePicker(false);
                     setShowCountryPicker(false);
                     setShowStatePicker(false);
@@ -2162,9 +2390,15 @@ function ProfileScreen({
                   }}>
                   <Text style={styles.secondaryButtonText}>Cancel</Text>
                 </Pressable>
-                <Pressable style={[styles.primaryButton, isSaving && styles.loadingCard]} onPress={handleSaveProfile} disabled={isSaving}>
-                  <Text style={styles.primaryButtonText}>{isSaving ? 'Saving...' : 'Save changes'}</Text>
-                </Pressable>
+                {editSection === 'account' ? (
+                  <Pressable style={[styles.primaryButton, isSaving && styles.loadingCard]} onPress={handleSaveProfile} disabled={isSaving}>
+                    <Text style={styles.primaryButtonText}>{isSaving ? 'Saving...' : 'Save changes'}</Text>
+                  </Pressable>
+                ) : (
+                  <Pressable style={[styles.primaryButton, isSavingTrustedContacts && styles.loadingCard]} onPress={handleSaveTrustedContacts} disabled={isSavingTrustedContacts}>
+                    <Text style={styles.primaryButtonText}>{isSavingTrustedContacts ? 'Saving...' : 'Save trusted contacts'}</Text>
+                  </Pressable>
+                )}
               </View>
             </>
           )}
@@ -2175,6 +2409,73 @@ function ProfileScreen({
             {profile?.onboarding?.completed ? 'Completed' : `Saved at step ${profile?.onboarding?.step || 'welcome'}`}
           </Text>
         </View>
+        {supportEnabled ? (
+          <View style={styles.softCard}>
+            <SectionTitle
+              title={profile?.emergency_support?.title || 'Emergency Support Path'}
+              action={profile?.emergency_support?.profile_complete ? 'Ready' : 'Setup recommended'}
+            />
+            <Text style={styles.listCardBody}>
+              {profile?.emergency_support?.description || 'Add trusted people and support options so help is easier to reach in a hard moment.'}
+            </Text>
+            {!isEditing ? (
+              <>
+                <Text style={styles.listCardBody}>
+                  {profile?.emergency_support?.trusted_contacts?.length
+                    ? `${profile.emergency_support.trusted_contacts.length} trusted contact${profile.emergency_support.trusted_contacts.length > 1 ? 's' : ''} saved`
+                    : 'No trusted contacts saved yet'}
+                </Text>
+                {profile?.emergency_support?.trusted_contacts?.length ? (
+                  <View style={styles.contactStack}>
+                    {profile.emergency_support.trusted_contacts.map((contact, index) => (
+                      <View key={contact.id || `saved-contact-${index}`} style={styles.contactCard}>
+                        <Text style={styles.listCardTitle}>{contact.name}</Text>
+                        <Text style={styles.listCardBody}>
+                          {[contact.relationship, contact.phone_number].filter(Boolean).join(' • ') || 'Trusted contact'}
+                        </Text>
+                        {contact.support_note ? <Text style={styles.listCardBody}>{contact.support_note}</Text> : null}
+                      </View>
+                    ))}
+                  </View>
+                ) : null}
+                {supportResource?.helpline_numbers?.length || supportResource?.emergency_number ? (
+                  <View style={styles.contactStack}>
+                    {supportResource?.helpline_numbers?.map(number => (
+                      <Pressable
+                        key={`helpline-${number}`}
+                        style={styles.secondaryWideButton}
+                        onPress={() => Linking.openURL(`tel:${number}`).catch(() => undefined)}>
+                        <Icon name="phone" size={16} color="#6d28d9" />
+                        <Text style={styles.secondaryButtonText}>{`${supportResource.helpline_label}: ${number}`}</Text>
+                      </Pressable>
+                    ))}
+                    {supportResource?.emergency_number ? (
+                      <Pressable
+                        style={styles.secondaryWideButton}
+                        onPress={() => Linking.openURL(`tel:${supportResource.emergency_number}`).catch(() => undefined)}>
+                        <Icon name="phone" size={16} color="#6d28d9" />
+                        <Text style={styles.secondaryButtonText}>{`${supportResource.emergency_label}: ${supportResource.emergency_number}`}</Text>
+                      </Pressable>
+                    ) : null}
+                  </View>
+                ) : null}
+                <Pressable
+                  style={styles.secondaryWideButton}
+                  onPress={() => {
+                    setFormError('');
+                    setSuccessMessage('');
+                    setIsEditing(true);
+                    setEditSection('trustedContacts');
+                  }}>
+                  <Icon name="plus" size={16} color="#6d28d9" />
+                  <Text style={styles.secondaryButtonText}>
+                    {profile?.emergency_support?.trusted_contacts?.length ? 'Manage trusted contacts' : 'Add trusted contact'}
+                  </Text>
+                </Pressable>
+              </>
+            ) : null}
+          </View>
+        ) : null}
         {!isEditing && successMessage ? (
           <View style={styles.inlineInfoSuccess}>
             <Icon name="check" size={16} color="#047857" />
@@ -2714,12 +3015,28 @@ export default function App() {
     tutorial: null,
   });
 
+  function resetToHomeAfterSessionExpiry() {
+    setAuthToken('');
+    setAppProfile(null);
+    setFamilyCards([]);
+    setGeneratedReframe(null);
+    setIsReframeLoading(false);
+    setIsSubmitting(false);
+    setError('');
+    setState(initialOnboardingState);
+    setStep('welcome');
+    clearLocalDraft();
+    void clearAppSession();
+    setMode('landing');
+    setActiveTab('home');
+  }
+
   const path = useMemo(() => buildFlow(state, onboardingConfig, Boolean(authToken)), [state, onboardingConfig, authToken]);
 
   const appScreen = useMemo(() => {
     switch (activeTab) {
       case 'chat':
-        return <ChatScreen state={state} authToken={authToken} generatedReframe={generatedReframe} onBack={() => setActiveTab('home')} />;
+        return <ChatScreen profile={appProfile} state={state} authToken={authToken} generatedReframe={generatedReframe} onBack={() => setActiveTab('home')} />;
       case 'reports':
         return <ReportsScreen authToken={authToken} onBack={() => setActiveTab('home')} />;
       case 'tools':
@@ -2737,7 +3054,7 @@ export default function App() {
     let active = true;
 
     async function bootstrapApp() {
-      const session = loadAppSession();
+      const session = await loadAppSession();
       if (!session) {
         if (active) setIsBootstrapping(false);
         return;
@@ -2750,7 +3067,7 @@ export default function App() {
         ]);
 
         if (!active || !profile) {
-          clearAppSession();
+          await clearAppSession();
           if (active) setIsBootstrapping(false);
           return;
         }
@@ -2782,6 +3099,16 @@ export default function App() {
       active = false;
     };
   }, [onboardingConfig.policy.allow_resume]);
+
+  useEffect(() => {
+    setUnauthorizedHandler(() => {
+      resetToHomeAfterSessionExpiry();
+    });
+
+    return () => {
+      setUnauthorizedHandler(null);
+    };
+  }, []);
 
   useEffect(() => {
     if (mode !== 'splash' || isBootstrapping) return;
@@ -2837,10 +3164,10 @@ export default function App() {
 
   useEffect(() => {
     if (!authToken) {
-      clearAppSession();
+      void clearAppSession();
       return;
     }
-    saveAppSession(authToken, activeTab);
+    void saveAppSession(authToken, activeTab);
   }, [authToken, activeTab]);
 
   useEffect(() => {
@@ -2865,7 +3192,12 @@ export default function App() {
         step,
         completed: state.onboardingComplete,
         state: persisted,
-      }).catch(() => undefined);
+      }).catch(error => {
+        if (!isUnauthorizedError(error)) {
+          return undefined;
+        }
+        return undefined;
+      });
     }, 300);
     return () => clearTimeout(timeout);
   }, [authToken, step, state, generatedReframe]);
@@ -2983,17 +3315,7 @@ export default function App() {
   }, [state.coachStyle, state.language]);
 
   function handleLogout() {
-    setAuthToken('');
-    setAppProfile(null);
-    setFamilyCards([]);
-    setGeneratedReframe(null);
-    setIsReframeLoading(false);
-    setState(initialOnboardingState);
-    setStep('welcome');
-    clearLocalDraft();
-    clearAppSession();
-    setMode('landing');
-    setActiveTab('home');
+    resetToHomeAfterSessionExpiry();
   }
 
   function setField<K extends keyof OnboardingState>(key: K, value: OnboardingState[K]) {
@@ -3610,8 +3932,16 @@ const styles = StyleSheet.create({
   coachMetaCard: {backgroundColor: 'rgba(255,255,255,0.88)', borderRadius: 24, padding: 16, gap: 8},
   coachSafetyCard: {backgroundColor: '#fef3c7', borderRadius: 20, padding: 14, flexDirection: 'row', gap: 10, alignItems: 'flex-start'},
   coachSafetyText: {flex: 1, fontSize: 13, lineHeight: 18, color: '#92400e'},
+  supportScreenCard: {backgroundColor: '#fff7ed', borderRadius: 24, padding: 16, gap: 10},
+  supportActionsWrap: {gap: 10, marginTop: 4},
+  editSectionTabs: {flexDirection: 'row', gap: 10, flexWrap: 'wrap'},
+  editSectionTab: {paddingHorizontal: 14, paddingVertical: 10, borderRadius: 999, backgroundColor: '#f3f4f6', borderWidth: 1, borderColor: '#e5e7eb'},
+  editSectionTabActive: {backgroundColor: '#ede9fe', borderColor: '#c4b5fd'},
+  editSectionTabText: {fontSize: 13, fontWeight: '600', color: '#6b7280'},
+  editSectionTabTextActive: {color: '#6d28d9'},
   actionRow: {flexDirection: 'row', gap: 12, marginTop: 24},
   primaryButton: {flex: 1, backgroundColor: '#7c3aed', borderRadius: 18, paddingVertical: 14, alignItems: 'center', justifyContent: 'center'},
+  primaryWideButton: {backgroundColor: '#7c3aed', borderRadius: 18, paddingVertical: 14, alignItems: 'center', justifyContent: 'center'},
   fullWidthButton: {flex: 1.5},
   primaryButtonText: {color: '#ffffff', fontWeight: '600', fontSize: 14},
   secondaryButton: {flex: 1, backgroundColor: 'rgba(255,255,255,0.92)', borderRadius: 18, paddingVertical: 14, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#ddd6fe'},
@@ -3660,6 +3990,8 @@ const styles = StyleSheet.create({
   familyMiniCell: {flex: 1, backgroundColor: '#f9fafb', borderRadius: 16, paddingHorizontal: 14, paddingVertical: 12},
   familyRuleText: {fontSize: 14, color: '#4b5563'},
   profileHero: {backgroundColor: 'rgba(255,255,255,0.94)', borderRadius: 24, padding: 16, flexDirection: 'row', alignItems: 'center', gap: 14},
+  contactStack: {gap: 12},
+  contactCard: {backgroundColor: '#faf5ff', borderRadius: 18, padding: 14, gap: 10},
   profileAvatar: {width: 56, height: 56, borderRadius: 22, backgroundColor: '#8b5cf6', alignItems: 'center', justifyContent: 'center'},
   profileAvatarText: {color: '#ffffff', fontSize: 24, fontWeight: '700'},
   profileName: {color: '#111827', fontSize: 20, fontWeight: '700'},

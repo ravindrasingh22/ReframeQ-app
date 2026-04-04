@@ -1,4 +1,4 @@
-import {buildApiUrl} from '../config/appConfig';
+import {apiRequest} from './api';
 
 export type AppProfile = {
   email: string;
@@ -16,12 +16,44 @@ export type AppProfile = {
   coach_style: string;
   dashboard_title: string;
   dashboard_subtitle: string;
+  emergency_support: {
+    enabled: boolean;
+    eligible: boolean;
+    profile_complete: boolean;
+    show_profile_prompt: boolean;
+    title: string;
+    description: string;
+    trusted_contacts: TrustedContact[];
+    resource: {
+      country: string;
+      helpline_label: string;
+      helpline_numbers: string[];
+      emergency_label: string;
+      emergency_number: string;
+      support_search_url: string;
+    };
+  };
   onboarding: {
     step: string;
     completed: boolean;
     updated_at?: string | null;
     state: Record<string, unknown>;
   };
+};
+
+export type TrustedContact = {
+  id?: string;
+  name: string;
+  relationship: string;
+  phone_number: string;
+  email: string;
+  preferred_language: string;
+  city: string;
+  state: string;
+  is_primary: boolean;
+  show_call_shortcut: boolean;
+  support_note: string;
+  active: boolean;
 };
 
 export type UpdateAppProfilePayload = {
@@ -32,21 +64,19 @@ export type UpdateAppProfilePayload = {
   state?: string;
   country?: string;
   language?: string;
+  emergency_support?: {
+    trusted_contacts: TrustedContact[];
+  };
 };
 
 export async function fetchMyProfile(token: string): Promise<AppProfile> {
-  const response = await fetch(buildApiUrl('/api/app/profile/me'), {
+  return apiRequest<AppProfile>('/api/app/profile/me', {
     headers: {Authorization: `Bearer ${token}`},
   });
-  const data = await response.json();
-  if (!response.ok) {
-    throw new Error(typeof data?.detail === 'string' ? data.detail : 'Failed to load profile');
-  }
-  return data as AppProfile;
 }
 
 export async function updateMyProfile(token: string, payload: UpdateAppProfilePayload): Promise<AppProfile> {
-  const response = await fetch(buildApiUrl('/api/app/profile/me'), {
+  return apiRequest<AppProfile>('/api/app/profile/me', {
     method: 'PATCH',
     headers: {
       Authorization: `Bearer ${token}`,
@@ -54,15 +84,10 @@ export async function updateMyProfile(token: string, payload: UpdateAppProfilePa
     },
     body: JSON.stringify(payload),
   });
-  const data = await response.json();
-  if (!response.ok) {
-    throw new Error(typeof data?.detail === 'string' ? data.detail : 'Failed to update profile');
-  }
-  return data as AppProfile;
 }
 
 export async function changeMyPassword(token: string, newPassword: string): Promise<void> {
-  const response = await fetch(buildApiUrl('/api/app/profile/me/password'), {
+  await apiRequest<unknown>('/api/app/profile/me/password', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
@@ -70,8 +95,10 @@ export async function changeMyPassword(token: string, newPassword: string): Prom
     },
     body: JSON.stringify({new_password: newPassword}),
   });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(typeof data?.detail === 'string' ? data.detail : 'Failed to change password');
-  }
+}
+
+export async function fetchEmergencySupportConfig(token: string): Promise<AppProfile['emergency_support']> {
+  return apiRequest<AppProfile['emergency_support']>('/api/app/profile/support-config', {
+    headers: {Authorization: `Bearer ${token}`},
+  });
 }

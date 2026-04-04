@@ -1,4 +1,4 @@
-import {buildApiUrl} from '../config/appConfig';
+import {apiRequest} from './api';
 
 export type DashboardHeader = {
   title: string;
@@ -113,36 +113,21 @@ export type MoodReport = {
 };
 
 export async function fetchHomeDashboard(token: string): Promise<HomeDashboard> {
-  const response = await fetch(buildApiUrl('/api/app/dashboard/home'), {
+  return apiRequest<HomeDashboard>('/api/app/dashboard/home', {
     headers: {Authorization: `Bearer ${token}`},
   });
-  const data = await response.json();
-  if (!response.ok) {
-    throw new Error(typeof data?.detail === 'string' ? data.detail : 'Failed to load dashboard');
-  }
-  return data as HomeDashboard;
 }
 
 export async function saveMoodCheckin(token: string, moodId: string): Promise<MoodCheckinResponse> {
-  const response = await fetch(buildApiUrl('/api/app/moods/check-in'), {
+  return apiRequest<MoodCheckinResponse>('/api/app/moods/check-in', {
     method: 'POST',
     headers: {'Content-Type': 'application/json', Authorization: `Bearer ${token}`},
     body: JSON.stringify({mood_id: moodId}),
   });
-  const data = await response.json();
-  if (!response.ok) {
-    throw new Error(typeof data?.detail === 'string' ? data.detail : 'Failed to save mood check-in');
-  }
-  return data as MoodCheckinResponse;
 }
 
 export async function fetchMoodReport(token: string, rangeDays: 7 | 14 | 30): Promise<MoodReport> {
-  const response = await fetch(buildApiUrl(`/api/app/moods/report?range_days=${rangeDays}`), {
+  return apiRequest<MoodReport>(`/api/app/moods/report?range_days=${rangeDays}`, {
     headers: {Authorization: `Bearer ${token}`},
   });
-  const data = await response.json();
-  if (!response.ok) {
-    throw new Error(typeof data?.detail === 'string' ? data.detail : 'Failed to load mood report');
-  }
-  return data as MoodReport;
 }

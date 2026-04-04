@@ -1,4 +1,4 @@
-import {buildApiUrl} from '../config/appConfig';
+import {apiRequest} from './api';
 
 export type PersistedOnboardingState = {
   account_mode: string;
@@ -49,63 +49,38 @@ export type OnboardingConfig = {
 };
 
 export async function validateInviteCode(inviteCode: string) {
-  const response = await fetch(buildApiUrl('/api/app/onboarding/invite/validate'), {
+  return apiRequest<{valid: boolean; invite_code: string; status: string; account_mode: string; invited_user_email?: string | null}>('/api/app/onboarding/invite/validate', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({invite_code: inviteCode}),
   });
-  const data = await response.json();
-  if (!response.ok) {
-    throw new Error(typeof data?.detail === 'string' ? data.detail : 'Invite validation failed');
-  }
-  return data as {valid: boolean; invite_code: string; status: string; account_mode: string; invited_user_email?: string | null};
 }
 
 export async function fetchOnboardingConfig() {
-  const response = await fetch(buildApiUrl('/api/app/onboarding/config'));
-  const data = await response.json();
-  if (!response.ok) {
-    throw new Error(typeof data?.detail === 'string' ? data.detail : 'Failed to load onboarding configuration');
-  }
-  return data as OnboardingConfig;
+  return apiRequest<OnboardingConfig>('/api/app/onboarding/config');
 }
 
 export async function scanOnboardingSafety(message: string) {
-  const response = await fetch(buildApiUrl('/api/app/onboarding/safety/scan'), {
+  return apiRequest<{scan_status: 'allow' | 'limit' | 'block' | 'handoff'; policy_code: string; blocked_topics: string[]; needs_handoff: boolean}>('/api/app/onboarding/safety/scan', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({message}),
   });
-  const data = await response.json();
-  if (!response.ok) {
-    throw new Error(typeof data?.detail === 'string' ? data.detail : 'Safety scan failed');
-  }
-  return data as {scan_status: 'allow' | 'limit' | 'block' | 'handoff'; policy_code: string; blocked_topics: string[]; needs_handoff: boolean};
 }
 
 export async function saveOnboardingState(
   token: string,
   payload: {step: string; completed: boolean; state: PersistedOnboardingState},
 ) {
-  const response = await fetch(buildApiUrl('/api/app/onboarding/state'), {
+  return apiRequest<{step: string; completed: boolean; state: PersistedOnboardingState; updated_at?: string | null}>('/api/app/onboarding/state', {
     method: 'PUT',
     headers: {'Content-Type': 'application/json', Authorization: `Bearer ${token}`},
     body: JSON.stringify(payload),
   });
-  const data = await response.json();
-  if (!response.ok) {
-    throw new Error(typeof data?.detail === 'string' ? data.detail : 'Failed to save onboarding');
-  }
-  return data as {step: string; completed: boolean; state: PersistedOnboardingState; updated_at?: string | null};
 }
 
 export async function fetchOnboardingState(token: string) {
-  const response = await fetch(buildApiUrl('/api/app/onboarding/state'), {
+  return apiRequest<{step: string; completed: boolean; state: PersistedOnboardingState; updated_at?: string | null}>('/api/app/onboarding/state', {
     headers: {Authorization: `Bearer ${token}`},
   });
-  const data = await response.json();
-  if (!response.ok) {
-    throw new Error(typeof data?.detail === 'string' ? data.detail : 'Failed to load onboarding');
-  }
-  return data as {step: string; completed: boolean; state: PersistedOnboardingState; updated_at?: string | null};
 }
